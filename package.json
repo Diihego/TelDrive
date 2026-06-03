@@ -1,0 +1,66 @@
+{
+  "name": "teldrive",
+  "version": "1.0.0",
+  "description": "Tu cloud personal en Telegram",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:backend":  "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "install:all":  "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "build:frontend": "cd frontend && npm run build",
+    "electron:dev": "npm run build:frontend && electron .",
+    "build": "npm run build:frontend && electron-builder --win --x64",
+    "build:portable": "npm run build:frontend && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.4"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.teldrive.app",
+    "productName": "TelDrive",
+    "copyright": "TelDrive",
+    "icon": "electron/icon.ico",
+    "files": [
+      "electron/**/*",
+      "!electron/generate-icon.js"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": ["**/*", "!node_modules/.cache", "!.env", "!*.db", "!teldrive.config.json"]
+      },
+      {
+        "from": "frontend/dist",
+        "to": "frontend/dist"
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "electron/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TelDrive"
+    },
+    "directories": {
+      "output": "dist-electron"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "TU_USUARIO_GITHUB",
+      "repo": "teldrive"
+    }
+  }
+}

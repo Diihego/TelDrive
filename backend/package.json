@@ -1,0 +1,18 @@
+{
+  "name": "teldrive-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "telegram": "^2.26.22",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "sql.js": "^1.12.0",
+    "dotenv": "^16.4.5",
+    "multer": "^2.0.1",
+    "input": "^1.0.1"
+  }
+}

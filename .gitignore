@@ -1,0 +1,14 @@
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+dist-electron/
+frontend/dist/
+
+# Datos locales
+*.db
+.env
+backend/.env
+teldrive.config.json
+
+# Logs
+*.log
