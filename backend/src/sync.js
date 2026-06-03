@@ -33,10 +33,35 @@ async function findManifestMessages(client, entity) {
   return ids
 }
 
+// Debounce por canal — evita subir múltiples manifests cuando hay ráfagas de operaciones
+const pushTimers = new Map()
+const pushRunning = new Map()
+
+export function pushManifest(channelId) {
+  return new Promise((resolve, reject) => {
+    // Cancelar timer anterior si existe
+    if (pushTimers.has(channelId)) {
+      clearTimeout(pushTimers.get(channelId))
+    }
+    // Esperar 2s de inactividad antes de ejecutar
+    const timer = setTimeout(async () => {
+      pushTimers.delete(channelId)
+      // Si ya hay uno corriendo para este canal, esperar a que termine
+      if (pushRunning.get(channelId)) {
+        try { await pushRunning.get(channelId) } catch (_) {}
+      }
+      const run = _pushManifest(channelId)
+      pushRunning.set(channelId, run)
+      run.then(resolve).catch(reject).finally(() => pushRunning.delete(channelId))
+    }, 2000)
+    pushTimers.set(channelId, timer)
+  })
+}
+
 /**
  * Sube el indice actual como JSON y elimina los manifests anteriores.
  */
-export async function pushManifest(channelId) {
+async function _pushManifest(channelId) {
   const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId)
   if (!channel) throw new Error('Canal no encontrado')
 
@@ -86,11 +111,16 @@ export async function pushManifest(channelId) {
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile)
   }
 
-  // Eliminar los manifests anteriores (revocar para todos los miembros)
-  if (oldIds.length > 0) {
+  // Buscar TODOS los manifests después de subir — incluye el nuevo y cualquier duplicado acumulado
+  // Ordenar desc por ID, conservar el más nuevo, borrar el resto
+  const allIds = await findManifestMessages(client, entity).catch(() => oldIds)
+  const sorted = [...allIds].sort((a, b) => b - a) // mayor ID = más nuevo
+  const toDelete = sorted.slice(1) // conservar el primero (más nuevo), borrar el resto
+
+  if (toDelete.length > 0) {
     try {
-      await client.deleteMessages(entity, oldIds, { revoke: true })
-      console.log('[sync] ' + oldIds.length + ' manifest(s) anterior(es) eliminado(s)')
+      await client.deleteMessages(entity, toDelete, { revoke: true })
+      console.log('[sync] ' + toDelete.length + ' manifest(s) duplicado(s) eliminado(s)')
     } catch (e) {
       console.warn('[sync] no se pudo eliminar manifests anteriores:', e.message)
     }

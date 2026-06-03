@@ -218,6 +218,8 @@ const css = `
     background: rgba(0,0,0,0.62); backdrop-filter: blur(8px);
     border-top: 1px solid rgba(255,255,255,0.08);
   }
+  .folder-del { opacity: 0; transition: opacity .15s; }
+  .folder-card:hover .folder-del { opacity: 1; }
   .folder-card-name {
     flex: 1; font-size: 13px; font-weight: 600; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -791,7 +793,7 @@ function UploadModal({ channels, currentChannel, currentPath, onClose, onUploade
                 : <><p>Arrastra o haz click para elegir</p><small>Cualquier tipo de archivo</small></>
               : folderFiles.length
                 ? <p style={{ color: 'var(--accent2)' }}>{folderFiles[0].relativePath.split('/')[0]} — {folderFiles.length} archivos</p>
-                : <><p>Haz click para elegir carpeta</p><small>Se subirán todos los archivos preservando subcarpetas</small></>}
+                : <><p>Haz click para elegir carpeta</p><small>Se sube toda la estructura de carpetas sin límite de profundidad</small></>}
           </div>
         </div>
 
@@ -889,7 +891,7 @@ function FileCard({ file, view, onDownload, onMove, onDelete, onPreview }) {
     return (
       <div className="file-row" draggable onDragStart={e => { e.dataTransfer.setData('teldrive-file-id', String(file.id)); e.dataTransfer.effectAllowed = 'move' }}>
         <span className="row-icon">{getFileIcon(file.type)}</span>
-        <span className="row-name" title={file.name}>{file.name}</span>
+        <span className="row-name" title={file.name}>{file.name}{file.part_total > 1 && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--accent2)' }}>⛓ {file.part_total} partes</span>}</span>
         <span className="row-meta">{formatSize(file.size)}</span>
         <span className="row-meta">{formatDate(file.date)}</span>
         <span style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
@@ -914,6 +916,7 @@ function FileCard({ file, view, onDownload, onMove, onDelete, onPreview }) {
       <div className="file-name" title={file.name}>{file.name}</div>
       <div className="file-meta">
         <span>{formatSize(file.size)}</span>
+        {file.part_total > 1 && <span style={{ color: 'var(--accent2)', fontSize: 10 }}>{'⛓ ' + file.part_total + ' partes'}</span>}
         <span>{formatDate(file.date)}</span>
       </div>
       <div className="file-actions">
@@ -935,7 +938,7 @@ function FileCard({ file, view, onDownload, onMove, onDelete, onPreview }) {
 
 const folderThumbCache = new Map() // path → { status: 'loading'|'found'|'empty', fileId?: number }
 
-function FolderCard({ folder, channelId, onClick, dragOver, onDragOver, onDragLeave, onDrop }) {
+function FolderCard({ folder, channelId, onClick, onDelete, dragOver, onDragOver, onDragLeave, onDrop }) {
   const ref = React.useRef()
   const [thumb, setThumb] = React.useState(() => folderThumbCache.get(folder.path) || null)
 
@@ -989,6 +992,10 @@ function FolderCard({ folder, channelId, onClick, dragOver, onDragOver, onDragLe
           <Icon d={icons.folder} size={15} stroke="var(--accent2)" />
           <span className="folder-card-name">{folder.name}</span>
           {folder.count != null && <span className="folder-card-count">{folder.count}</span>}
+          {onDelete && <button className="btn btn-ghost btn-icon folder-del" style={{ marginLeft: 'auto', color: 'var(--danger, #ef4444)', padding: 2 }}
+            onClick={e => { e.stopPropagation(); onDelete(folder) }} title="Eliminar carpeta">
+            <Icon d={icons.trash} size={12} />
+          </button>}
         </div>
       </> : <>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -998,6 +1005,10 @@ function FolderCard({ folder, channelId, onClick, dragOver, onDragOver, onDragLe
           <Icon d={icons.folder} size={15} stroke="var(--accent2)" />
           <span className="folder-card-name">{folder.name}</span>
           {folder.count != null && <span className="folder-card-count">{folder.count}</span>}
+          {onDelete && <button className="btn btn-ghost btn-icon folder-del" style={{ marginLeft: 'auto', color: 'var(--danger, #ef4444)', padding: 2 }}
+            onClick={e => { e.stopPropagation(); onDelete(folder) }} title="Eliminar carpeta">
+            <Icon d={icons.trash} size={12} />
+          </button>}
         </div>
       </>}
     </div>
@@ -1222,17 +1233,17 @@ function MainApp() {
   const [chDragIdx, setChDragIdx] = useState(null)
   const [chDragOver, setChDragOver] = useState(null)
 
-  function applyChannelOrder(chs) {
-    const saved = localStorage.getItem('teldrive-channel-order')
-    if (!saved) return chs
-    const order = JSON.parse(saved)
+  const [defaultChannelId, setDefaultChannelId] = useState(null)
+
+  function applyChannelOrder(chs, order) {
+    if (!order || !order.length) return chs
     return [...chs].sort((a, b) => {
       const ai = order.indexOf(a.id), bi = order.indexOf(b.id)
       return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
     })
   }
   function saveChannelOrder(chs) {
-    localStorage.setItem('teldrive-channel-order', JSON.stringify(chs.map(c => c.id)))
+    api.setPrefs({ 'channel-order': chs.map(c => c.id) }).catch(() => {})
   }
   function handleChDragStart(e, idx) { e.stopPropagation(); setChDragIdx(idx) }
   function handleChDragOver(e, idx) { e.preventDefault(); e.stopPropagation(); setChDragOver(idx) }
@@ -1246,12 +1257,23 @@ function MainApp() {
     saveChannelOrder(reordered)
     setChDragIdx(null); setChDragOver(null)
   }
-  const [defaultChannelId, setDefaultChannelId] = useState(() => {
-    const v = localStorage.getItem('teldrive-default-channel')
-    return v ? parseInt(v) : null
-  })
   const [currentPath, setCurrentPath] = useState('/')
   const [files, setFiles] = useState([])
+  const [filesPage, setFilesPage] = useState(1)
+  const [filesHasMore, setFilesHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [sortBy, setSortBy] = useState('name')
+  const [sortDir, setSortDir] = useState('asc')
+  const FILES_PER_PAGE = 100
+
+  function handleSort(col) {
+    if (sortBy === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(col)
+      setSortDir('asc')
+    }
+  }
   const [tree, setTree] = useState(null)
   const [view, setView] = useState('grid')
   const [searchQ, setSearchQ] = useState('')
@@ -1262,6 +1284,7 @@ function MainApp() {
 
   const [showAddChannel, setShowAddChannel] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [confirm, setConfirm] = useState(null) // { message, onConfirm }
   const [showNewFolder, setShowNewFolder] = useState(false)
   const [moveFile, setMoveFile] = useState(null)
   const [previewFile, setPreviewFile] = useState(null)
@@ -1272,15 +1295,16 @@ function MainApp() {
 
   // Load channels & stats
   useEffect(() => {
-    api.getChannels().then(chs => {
-      const ordered = applyChannelOrder(chs)
+    Promise.all([api.getChannels(), api.getPrefs()]).then(([chs, prefs]) => {
+      const order = prefs['channel-order'] || []
+      const defaultId = prefs['default-channel'] ? parseInt(prefs['default-channel']) : null
+      setDefaultChannelId(defaultId)
+      const ordered = applyChannelOrder(chs, order)
       setChannels(ordered)
-      const chs2 = ordered
-      if (!chs2.length) return
-      if (chs2.length === 1) { selectChannel(chs2[0]); return }
-      const saved = localStorage.getItem('teldrive-default-channel')
-      if (saved) {
-        const found = chs2.find(c => c.id === parseInt(saved))
+      if (!ordered.length) return
+      if (ordered.length === 1) { selectChannel(ordered[0]); return }
+      if (defaultId) {
+        const found = ordered.find(c => c.id === defaultId)
         if (found) selectChannel(found)
       }
     }).catch(() => {})
@@ -1328,14 +1352,17 @@ function MainApp() {
     setLoading(true)
     setSearchResults(null)
     setSearchQ('')
+    setFilesPage(1)
     Promise.all([
-      api.getFiles({ channel_id: activeChannel.id, path: currentPath, limit: 200 }),
+      api.getFiles({ channel_id: activeChannel.id, path: currentPath, limit: FILES_PER_PAGE, page: 1, sort: sortBy, dir: sortDir }),
       tree ? Promise.resolve(null) : api.getTree(activeChannel.id),
     ]).then(([fileRes, treeRes]) => {
-      setFiles(fileRes.files || [])
+      const fetched = fileRes.files || []
+      setFiles(fetched)
+      setFilesHasMore(fetched.length === FILES_PER_PAGE)
       if (treeRes) setTree(treeRes)
     }).then(() => setLoading(false)).catch(e => { toast(e.message, 'error'); setLoading(false) })
-  }, [activeChannel, currentPath, refreshKey])
+  }, [activeChannel, currentPath, refreshKey, sortBy, sortDir])
 
   // Search
   useEffect(() => {
@@ -1391,15 +1418,49 @@ function MainApp() {
   function handleMove(file) { setMoveFile(file) }
   function handlePreview(file) { if (file.type === 'image') setPreviewFile(file) }
 
-  async function handleDelete(file) {
-    if (!window.confirm(`¿Eliminar "${file.name}"? Esta acción no se puede deshacer.`)) return
+  async function handleLoadMore() {
+    if (loadingMore || !filesHasMore) return
+    setLoadingMore(true)
+    const nextPage = filesPage + 1
     try {
-      await api.deleteFile(file.id)
-      toast(`Eliminado: ${file.name}`, 'success')
-      setRefreshKey(k => k + 1)
-    } catch (err) {
-      toast('Error al eliminar: ' + err.message, 'error')
-    }
+      const res = await api.getFiles({ channel_id: activeChannel.id, path: currentPath, limit: FILES_PER_PAGE, page: nextPage, sort: sortBy, dir: sortDir })
+      const fetched = res.files || []
+      setFiles(prev => [...prev, ...fetched])
+      setFilesPage(nextPage)
+      setFilesHasMore(fetched.length === FILES_PER_PAGE)
+    } catch (e) { toast(e.message, 'error') }
+    finally { setLoadingMore(false) }
+  }
+
+  async function handleDeleteFolder(folder) {
+    setConfirm({
+      message: `¿Eliminar la carpeta "${folder.name}" y todo su contenido?`,
+      onConfirm: async () => {
+        try {
+          await api.deleteFolder(folder.id, activeChannel.id, folder.path)
+          toast(`Carpeta eliminada: ${folder.name}`, 'success')
+          api.getTree(activeChannel.id).then(setTree).catch(() => {})
+          setRefreshKey(k => k + 1)
+        } catch (err) {
+          toast('Error al eliminar: ' + err.message, 'error')
+        }
+      }
+    })
+  }
+
+  async function handleDelete(file) {
+    setConfirm({
+      message: `¿Eliminar "${file.name}"?`,
+      onConfirm: async () => {
+        try {
+          await api.deleteFile(file.id)
+          toast(`Eliminado: ${file.name}`, 'success')
+          setRefreshKey(k => k + 1)
+        } catch (err) {
+          toast('Error al eliminar: ' + err.message, 'error')
+        }
+      }
+    })
   }
 
   async function handleDragMove(fileId, targetPath) {
@@ -1527,10 +1588,13 @@ function MainApp() {
       toast('Indexado: ' + res.indexed + ' nuevos archivos', 'success')
       if (activeChannel?.id === ch.id) {
         const [fileRes, treeRes] = await Promise.all([
-          api.getFiles({ channel_id: ch.id, path: currentPath, limit: 200 }),
+          api.getFiles({ channel_id: ch.id, path: currentPath, limit: FILES_PER_PAGE, page: 1 }),
           api.getTree(ch.id),
         ])
-        setFiles(fileRes.files || [])
+        const fetched = fileRes.files || []
+        setFiles(fetched)
+        setFilesPage(1)
+        setFilesHasMore(fetched.length === FILES_PER_PAGE)
         setTree(treeRes)
       }
       const updated = await api.getChannels()
@@ -1539,15 +1603,19 @@ function MainApp() {
     finally { setIndexing(i => ({ ...i, [ch.id]: false })) }
   }
 
-  async function handleDelete(ch, e) {
+  async function handleDeleteChannel(ch, e) {
     e.stopPropagation()
-    if (!confirm('¿Eliminar el canal "' + ch.name + '" y todos sus archivos del índice?')) return
-    try {
-      await api.deleteChannel(ch.id)
-      setChannels(cs => cs.filter(c => c.id !== ch.id))
-      if (activeChannel?.id === ch.id) { setActiveChannel(null); setFiles([]); setTree(null) }
-      toast('Canal eliminado', 'success')
-    } catch (e) { toast(e.message, 'error') }
+    setConfirm({
+      message: `¿Eliminar el canal "${ch.name}" y todos sus archivos del índice?`,
+      onConfirm: async () => {
+        try {
+          await api.deleteChannel(ch.id)
+          setChannels(cs => cs.filter(c => c.id !== ch.id))
+          if (activeChannel?.id === ch.id) { setActiveChannel(null); setFiles([]); setTree(null) }
+          toast('Canal eliminado', 'success')
+        } catch (err) { toast(err.message, 'error') }
+      }
+    })
   }
 
   async function handleDownload(file) {
@@ -1652,14 +1720,13 @@ function MainApp() {
                       e.stopPropagation()
                       const next = defaultChannelId === ch.id ? null : ch.id
                       setDefaultChannelId(next)
-                      if (next) localStorage.setItem('teldrive-default-channel', next)
-                      else localStorage.removeItem('teldrive-default-channel')
+                      api.setPrefs({ 'default-channel': next }).catch(() => {})
                     }}>
                     {defaultChannelId === ch.id ? '★' : '☆'}
                   </button>
                 )}
                 <button className="btn btn-icon ch-del" style={{ ...ICON_BTN, color: 'var(--danger)' }}
-                  onClick={e => handleDelete(ch, e)}>
+                  onClick={e => handleDeleteChannel(ch, e)}>
                   <Icon d={icons.trash} size={13} />
                 </button>
               </div>
@@ -1727,6 +1794,20 @@ function MainApp() {
               </>
             )}
 
+            {activeChannel && (
+              <div style={{ display: 'flex', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: 2, gap: 1 }}>
+                {[['name','Nombre'],['date','Fecha'],['size','Tamaño'],['type','Tipo']].map(([col, label]) => (
+                  <button key={col}
+                    style={{ padding: '4px 8px', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: sortBy === col ? 'var(--bg2)' : 'none',
+                      color: sortBy === col ? 'var(--text)' : 'var(--text3)' }}
+                    onClick={() => handleSort(col)}>
+                    {label}{sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="view-toggle">
               <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><Icon d={icons.grid} size={15} /></button>
               <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><Icon d={icons.list} size={15} /></button>
@@ -1752,7 +1833,7 @@ function MainApp() {
               ) : (
                 <div className="empty">
                   <div className="empty-icon">📂</div>
-                  <h3>Elegí un canal</h3>
+                  <h3>Elige un canal</h3>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12, minWidth: 220 }}>
                     {channels.map(ch => (
                       <button key={ch.id} className="btn" style={{ justifyContent: 'space-between', padding: '10px 16px', background: 'var(--bg2)', border: '1px solid var(--border2)', fontSize: 14 }}
@@ -1782,6 +1863,7 @@ function MainApp() {
                           channelId={activeChannel.id}
                           dragOver={dragOver === f.path}
                           onClick={() => setCurrentPath(f.path)}
+                          onDelete={handleDeleteFolder}
                           onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOver(f.path) }}
                           onDragLeave={e => { e.stopPropagation(); setDragOver(null) }}
                           onDrop={e => {
@@ -1804,20 +1886,38 @@ function MainApp() {
                     <p>{searchResults !== null ? 'Probá con otro término.' : 'No hay archivos indexados en esta carpeta.\nSube algo o re-indexa el canal.'}</p>
                   </div>
                 ) : view === 'grid' ? (
-                  <div className="file-grid">
-                    {displayFiles.map(f => <FileCard key={f.id} file={f} view="grid" onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} onPreview={handlePreview} />)}
-                  </div>
-                ) : (
-                  <div className="file-list">
-                    <div className="file-row" style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--mono)', cursor: 'default' }}>
-                      <span />
-                      <span>Nombre</span>
-                      <span style={{ textAlign: 'right' }}>Tamaño</span>
-                      <span style={{ textAlign: 'right' }}>Fecha</span>
-                      <span />
+                  <>
+                    <div className="file-grid">
+                      {displayFiles.map(f => <FileCard key={f.id} file={f} view="grid" onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} onPreview={handlePreview} />)}
                     </div>
-                    {displayFiles.map(f => <FileCard key={f.id} file={f} view="list" onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} />)}
-                  </div>
+                    {filesHasMore && searchResults === null && (
+                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                        <button className="btn" style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', color: 'var(--text3)', minWidth: 140 }} onClick={handleLoadMore} disabled={loadingMore}>
+                          {loadingMore ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Cargar más'}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="file-list">
+                      <div className="file-row" style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--mono)', cursor: 'default' }}>
+                        <span />
+                        <span>Nombre</span>
+                        <span style={{ textAlign: 'right' }}>Tamaño</span>
+                        <span style={{ textAlign: 'right' }}>Fecha</span>
+                        <span />
+                      </div>
+                      {displayFiles.map(f => <FileCard key={f.id} file={f} view="list" onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} />)}
+                    </div>
+                    {filesHasMore && searchResults === null && (
+                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                        <button className="btn" style={{ background: 'var(--bg2)', border: '1px solid var(--border2)', color: 'var(--text3)', minWidth: 140 }} onClick={handleLoadMore} disabled={loadingMore}>
+                          {loadingMore ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Cargar más'}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1866,6 +1966,24 @@ function MainApp() {
       )}
 
       {dragOver && <div className='drop-hint'>Soltar para subir{dragOver !== 'content' ? ' en ' + dragOver : ''}</div>}
+
+      {confirm && (
+        <div className="overlay" onClick={() => setConfirm(null)}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 32, textAlign: 'center', marginBottom: 8 }}>🗑️</div>
+            <p style={{ textAlign: 'center', color: 'var(--text)', marginBottom: 20, lineHeight: 1.5 }}>{confirm.message}</p>
+            <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--text3)', marginBottom: 20 }}>Esta acción no se puede deshacer.</p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setConfirm(null)}>Cancelar</button>
+              <button className="btn" style={{ background: 'var(--danger, #ef4444)', color: '#fff' }}
+                onClick={() => { confirm.onConfirm(); setConfirm(null) }}>
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <TransferPanel />
       <Toasts />
     </>

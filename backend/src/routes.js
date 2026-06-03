@@ -42,17 +42,19 @@ function writeChunk(srcPath, destPath, start, end) {
 
 function buildTree(paths) {
   const root = { name: '/', path: '/', children: [], count: 0 }
-  for (const { path, count } of paths) {
+  for (const { path, count, id } of paths) {
     const parts = path.replace(/^\//, '').replace(/\/$/, '').split('/').filter(Boolean)
     let node = root
     let current = '/'
-    for (const part of parts) {
-      current = current + part + '/'
+    for (let i = 0; i < parts.length; i++) {
+      current = current + parts[i] + '/'
       let child = node.children.find(c => c.path === current)
       if (!child) {
-        child = { name: part, path: current, children: [], count: 0 }
+        child = { name: parts[i], path: current, children: [], count: 0 }
         node.children.push(child)
       }
+      // Asignar id solo al nodo hoja exacto
+      if (i === parts.length - 1 && id) child.id = id
       child.count += count
       node = child
     }
@@ -240,8 +242,12 @@ router.post('/channels/:id/pull', async (req, res) => {
 // ─── Archivos ─────────────────────────────────────────────────────────────────
 
 router.get('/files', async (req, res) => {
-  const { channel_id, path = '/', type, q, page = 1, limit = 50 } = req.query
+  const { channel_id, path = '/', type, q, page = 1, limit = 50, sort = 'name', dir = 'asc' } = req.query
   const offset = (parseInt(page) - 1) * parseInt(limit)
+
+  const SORT_COLS = { name: 'COALESCE(f.part_name, f.name)', date: 'f.date', size: 'total_size', type: 'f.type' }
+  const sortCol = SORT_COLS[sort] || SORT_COLS.name
+  const sortDir = dir === 'desc' ? 'DESC' : 'ASC'
 
   let where = ['1=1']
   let params = []
@@ -263,7 +269,7 @@ router.get('/files', async (req, res) => {
     FROM files f
     JOIN channels c ON c.id = f.channel_id
     WHERE ${whereStr}
-    ORDER BY f.path, f.name
+    ORDER BY ${sortCol} ${sortDir}
     LIMIT ? OFFSET ?
   `).all([...params, parseInt(limit), offset])
 
@@ -290,8 +296,8 @@ router.get('/tree/:channel_id', (req, res) => {
   `).all(channel_id)
 
   const explicitFolders = db.prepare(
-    'SELECT full_path as path FROM folders WHERE channel_id = ?'
-  ).all(channel_id).map(f => ({ path: f.path, count: 0 }))
+    'SELECT id, full_path as path FROM folders WHERE channel_id = ?'
+  ).all(channel_id).map(f => ({ id: f.id, path: f.path, count: 0 }))
 
   const seen = new Set(filePaths.map(p => p.path))
   const allPaths = [...filePaths, ...explicitFolders.filter(f => !seen.has(f.path))]
@@ -308,12 +314,33 @@ router.get('/search', (req, res) => {
   res.json(db.prepare(sql).all(params))
 })
 
-router.delete('/files/:id', (req, res) => {
+router.delete('/files/:id', async (req, res) => {
   const file = db.prepare('SELECT * FROM files WHERE id = ?').get(req.params.id)
   if (!file) return res.status(404).json({ error: 'Archivo no encontrado' })
-  db.prepare('DELETE FROM files WHERE id = ?').run(req.params.id)
-  // Si era parte de un multipart, borrar todo el grupo
-  if (file.part_group) db.prepare('DELETE FROM files WHERE part_group = ?').run(file.part_group)
+
+  // Recolectar todos los message_ids a borrar (multipart o simple)
+  const filesToDelete = file.part_group
+    ? db.prepare('SELECT * FROM files WHERE part_group = ?').all(file.part_group)
+    : [file]
+  const messageIds = [...new Set(filesToDelete.map(f => f.message_id).filter(Boolean))]
+
+  // Borrar mensajes en Telegram
+  try {
+    const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(file.channel_id)
+    const client = await getClient()
+    const entity = await getChannelEntity(channel.tg_id, channel.access_hash)
+    await client.deleteMessages(entity, messageIds, { revoke: true })
+  } catch (err) {
+    console.error('[delete] Error al borrar en Telegram:', err.message)
+    // No bloqueamos — igual borramos del índice
+  }
+
+  // Borrar del índice local
+  if (file.part_group) {
+    db.prepare('DELETE FROM files WHERE part_group = ?').run(file.part_group)
+  } else {
+    db.prepare('DELETE FROM files WHERE id = ?').run(req.params.id)
+  }
   pushManifest(file.channel_id).catch(e => console.error('[sync] push error:', e.message))
   res.json({ ok: true })
 })
@@ -809,7 +836,54 @@ router.post('/folders', (req, res) => {
 })
 
 router.delete('/folders/:id', (req, res) => {
-  db.prepare('DELETE FROM folders WHERE id = ?').run(req.params.id)
+  // Acepta id numérico o "bypath" con query ?channel_id=&path=
+  const { channel_id, path: folderPath } = req.query
+  let channelId, fullPath
+
+  if (req.params.id === 'bypath') {
+    if (!channel_id || !folderPath) return res.status(400).json({ error: 'channel_id y path requeridos' })
+    channelId = parseInt(channel_id)
+    fullPath = folderPath.endsWith('/') ? folderPath : folderPath + '/'
+  } else {
+    const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(req.params.id)
+    if (!folder) return res.status(404).json({ error: 'Carpeta no encontrada' })
+    channelId = folder.channel_id
+    fullPath = folder.full_path.endsWith('/') ? folder.full_path : folder.full_path + '/'
+  }
+
+  // Obtener todos los archivos antes de borrarlos
+  const filesToDelete = db.prepare("SELECT * FROM files WHERE channel_id = ? AND (path = ? OR path LIKE ?)").all([channelId, fullPath, fullPath + '%'])
+  const messageIds = [...new Set(filesToDelete.map(f => f.message_id).filter(Boolean))]
+
+  // Borrar mensajes en Telegram
+  if (messageIds.length) {
+    getClient().then(async client => {
+      const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId)
+      const entity = await getChannelEntity(channel.tg_id, channel.access_hash)
+      await client.deleteMessages(entity, messageIds, { revoke: true })
+    }).catch(err => console.error('[delete folder] Error Telegram:', err.message))
+  }
+
+  // Borrar del índice local
+  db.prepare("DELETE FROM folders WHERE channel_id = ? AND (full_path = ? OR full_path LIKE ?)").run([channelId, fullPath, fullPath + '%'])
+  db.prepare("DELETE FROM files WHERE channel_id = ? AND (path = ? OR path LIKE ?)").run([channelId, fullPath, fullPath + '%'])
+  pushManifest(channelId).catch(e => console.error('[sync] push error:', e.message))
+  res.json({ ok: true })
+})
+
+// ─── Preferencias ────────────────────────────────────────────────────────────
+
+router.get('/prefs', (req, res) => {
+  const rows = db.prepare('SELECT key, value FROM prefs').all()
+  const prefs = {}
+  rows.forEach(r => { try { prefs[r.key] = JSON.parse(r.value) } catch { prefs[r.key] = r.value } })
+  res.json(prefs)
+})
+
+router.patch('/prefs', (req, res) => {
+  for (const [key, value] of Object.entries(req.body)) {
+    db.prepare('INSERT OR REPLACE INTO prefs (key, value) VALUES (?, ?)').run([key, JSON.stringify(value)])
+  }
   res.json({ ok: true })
 })
 

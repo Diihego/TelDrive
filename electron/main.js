@@ -86,7 +86,9 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()
-    mainWindow.webContents.openDevTools()
+    if (isDev || process.argv.includes('--devtools')) {
+      mainWindow.webContents.openDevTools()
+    }
   })
 
   // Minimizar a tray en vez de cerrar

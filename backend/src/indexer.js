@@ -86,6 +86,7 @@ export async function indexChannel(channelId) {
     const insertBatch = db.transaction((msgs) => {
       for (const msg of msgs) {
         if (!msg.media) continue
+        if (msg.message && msg.message.includes('#teldrive_index')) continue // manifest interno
         const doc = msg.media.document || msg.media.photo
         if (!doc) continue
 
@@ -115,6 +116,7 @@ export async function startLiveIndexer() {
   client.addEventHandler(async (event) => {
     const msg = event.message
     if (!msg || !msg.media) return
+    if (msg.message && msg.message.includes('#teldrive_index')) return // manifest interno
 
     const doc = msg.media.document || msg.media.photo
     if (!doc) return

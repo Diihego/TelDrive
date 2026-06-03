@@ -50,6 +50,10 @@ db.run(`
     created_at TEXT DEFAULT (datetime('now')),
     UNIQUE(channel_id, full_path)
   );
+  CREATE TABLE IF NOT EXISTS prefs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
   CREATE INDEX IF NOT EXISTS idx_files_channel ON files(channel_id);
   CREATE INDEX IF NOT EXISTS idx_folders_channel ON folders(channel_id);

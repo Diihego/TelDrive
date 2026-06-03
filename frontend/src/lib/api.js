@@ -63,7 +63,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ channel_id: channelId, path, name }),
   }),
-  deleteFolder: (id) => req('/folders/' + id, { method: 'DELETE' }),
+  deleteFolder: (id, channelId, path) => {
+    if (id) return req('/folders/' + id, { method: 'DELETE' })
+    const qs = new URLSearchParams({ channel_id: channelId, path }).toString()
+    return req('/folders/bypath?' + qs, { method: 'DELETE' })
+  },
 
   // Borrar archivo
   deleteFile: (id) => req('/files/' + id, { method: 'DELETE' }),
@@ -87,6 +91,10 @@ export const api = {
   setupSendCode: (phone) => req('/setup/send-code', { method: 'POST', body: JSON.stringify({ phone }) }),
   setupSignIn: (code) => req('/setup/sign-in', { method: 'POST', body: JSON.stringify({ code }) }),
   setup2fa: (password) => req('/setup/2fa', { method: 'POST', body: JSON.stringify({ password }) }),
+
+  // Preferencias
+  getPrefs: () => req('/prefs'),
+  setPrefs: (prefs) => req('/prefs', { method: 'PATCH', body: JSON.stringify(prefs) }),
 
   // Stats
   getStats: () => req('/stats'),
