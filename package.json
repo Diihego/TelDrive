@@ -1,6 +1,6 @@
 {
   "name": "teldrive",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Tu cloud personal en Telegram",
   "private": true,
   "type": "module",
@@ -60,7 +60,7 @@
     "publish": {
       "provider": "github",
       "owner": "Diihego",
-      "repo": "teldrive"
+      "repo": "TelDrive"
     }
   }
 }

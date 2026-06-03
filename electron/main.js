@@ -139,6 +139,22 @@ function createTray() {
   })
 }
 
+// ─── Instancia única ──────────────────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // Si alguien abre una segunda instancia, traer la ventana existente al frente
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 // Quitar la barra de menú (File, Edit, View...)
