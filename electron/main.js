@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, MenuItem, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain } from 'electron'
 import path from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { createRequire } from 'module'
@@ -13,13 +13,27 @@ let mainWindow = null
 let tray = null
 let backendStarted = false
 
+// ─── Instancia única ──────────────────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
 // ─── Iniciar backend Express ──────────────────────────────────────────────────
 
 async function startBackend() {
   if (backendStarted) return
   backendStarted = true
   try {
-    // Directorio de datos del usuario (AppData\Roaming\TelDrive en Windows)
     const userDataPath = app.getPath('userData')
     process.env.TELDRIVE_DATA_DIR = userDataPath
     console.log('[electron] Datos en:', userDataPath)
@@ -62,6 +76,10 @@ function waitForBackend(retries = 20) {
 // ─── Crear ventana principal ──────────────────────────────────────────────────
 
 function createWindow() {
+  const preloadPath = isDev
+    ? path.join(__dirname, 'preload.js')
+    : path.join(__dirname, 'preload.js')
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -73,11 +91,11 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: preloadPath,
     },
-    show: false, // mostrar cuando esté listo
+    show: false,
   })
 
-  // Cargar el frontend como archivo local (evita restricciones de seguridad de Electron)
   const distPath = isDev
     ? path.join(__dirname, '../frontend/dist/index.html')
     : path.join(process.resourcesPath, 'frontend/dist/index.html')
@@ -91,15 +109,41 @@ function createWindow() {
     }
   })
 
-  // Minimizar a tray en vez de cerrar
+  // Al cerrar: enviar evento al renderer para mostrar modal custom
   mainWindow.on('close', e => {
-    if (!app.isQuitting) {
-      e.preventDefault()
+    if (app.isQuitting) return
+    e.preventDefault()
+    mainWindow.webContents.send('close-request')
+  })
+
+  // Escuchar respuesta del renderer
+  ipcMain.once('close-choice', (_, choice) => {
+    if (choice === 'minimize') {
       mainWindow.hide()
+      // Re-registrar el listener para la próxima vez
+      mainWindow.on('close', function handler(e) {
+        if (app.isQuitting) return
+        e.preventDefault()
+        mainWindow.removeListener('close', handler)
+        mainWindow.webContents.send('close-request')
+        ipcMain.once('close-choice', (_, c) => {
+          if (c === 'minimize') {
+            mainWindow.hide()
+            mainWindow.on('close', handler)
+          } else {
+            app.isQuitting = true
+            tray?.destroy()
+            app.quit()
+          }
+        })
+      })
+    } else {
+      app.isQuitting = true
+      tray?.destroy()
+      app.quit()
     }
   })
 
-  // Abrir links externos en el navegador del sistema
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
@@ -116,48 +160,23 @@ function createTray() {
   const menu = Menu.buildFromTemplate([
     {
       label: 'Mostrar TelDrive',
-      click: () => {
-        mainWindow.show()
-        mainWindow.focus()
-      },
+      click: () => { mainWindow.show(); mainWindow.focus() },
     },
     { type: 'separator' },
     {
       label: 'Salir',
-      click: () => {
-        app.isQuitting = true
-        app.quit()
-      },
+      click: () => { app.isQuitting = true; tray?.destroy(); app.quit() },
     },
   ])
 
   tray.setToolTip('TelDrive')
   tray.setContextMenu(menu)
-  tray.on('double-click', () => {
-    mainWindow.show()
-    mainWindow.focus()
-  })
-}
-
-// ─── Instancia única ──────────────────────────────────────────────────────────
-
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  app.quit()
-} else {
-  app.on('second-instance', () => {
-    // Si alguien abre una segunda instancia, traer la ventana existente al frente
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
-    }
-  })
+  tray.on('double-click', () => { mainWindow.show(); mainWindow.focus() })
+  tray.on('click', () => { mainWindow.show(); mainWindow.focus() })
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
-// Quitar la barra de menú (File, Edit, View...)
 Menu.setApplicationMenu(null)
 
 // ─── Auto-updater ─────────────────────────────────────────────────────────────
@@ -182,46 +201,31 @@ async function setupUpdater() {
       buttons: ['Instalar ahora', 'Más tarde'],
       defaultId: 0,
     })
-    if (choice === 0) {
-      autoUpdater.quitAndInstall()
-    }
+    if (choice === 0) autoUpdater.quitAndInstall()
   })
 
   autoUpdater.on('error', err => {
     console.error('[updater] Error:', err.message)
   })
 
-  // Verificar al iniciar y cada 1 hora
   autoUpdater.checkForUpdates().catch(() => {})
   setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 60 * 60 * 1000)
 }
 
 app.whenReady().then(async () => {
   await startBackend()
-
-  try {
-    await waitForBackend()
-  } catch (err) {
+  try { await waitForBackend() } catch (err) {
     console.error('[electron] Backend no disponible:', err.message)
   }
-
   createWindow()
   createTray()
   setupUpdater()
 })
 
-app.on('window-all-closed', e => {
-  // No salir al cerrar la ventana — queda en tray
-  e.preventDefault()
-})
+app.on('window-all-closed', e => e.preventDefault())
 
 app.on('activate', () => {
-  if (mainWindow) {
-    mainWindow.show()
-    mainWindow.focus()
-  }
+  if (mainWindow) { mainWindow.show(); mainWindow.focus() }
 })
 
-app.on('before-quit', () => {
-  app.isQuitting = true
-})
+app.on('before-quit', () => { app.isQuitting = true })

@@ -82,6 +82,7 @@ const migrations = [
   )`,
   'CREATE INDEX IF NOT EXISTS idx_dl_job ON download_sessions(job_id)',
   'ALTER TABLE download_sessions ADD COLUMN notified INTEGER DEFAULT 0',
+  'ALTER TABLE files ADD COLUMN alias TEXT',
 ]
 for (const m of migrations) {
   try { db.run(m); save() } catch (_) {}

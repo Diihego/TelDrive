@@ -1,6 +1,6 @@
 {
   "name": "teldrive",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Tu cloud personal en Telegram",
   "private": true,
   "type": "module",
@@ -28,7 +28,8 @@
     "icon": "electron/icon.ico",
     "files": [
       "electron/**/*",
-      "!electron/generate-icon.js"
+      "!electron/generate-icon.js",
+      "electron/preload.js"
     ],
     "extraResources": [
       {

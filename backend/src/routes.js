@@ -141,9 +141,9 @@ router.get('/upload-progress/:jobId', (req, res) => {
 
 router.get('/channels', (req, res) => {
   const channels = db.prepare(`
-    SELECT c.*, COUNT(f.id) as file_count
+    SELECT c.*, COUNT(f.id) as file_count, SUM(f.size) as total_size
     FROM channels c
-    LEFT JOIN files f ON f.channel_id = c.id
+    LEFT JOIN files f ON f.channel_id = c.id AND (f.part_num IS NULL OR f.part_num = 1)
     GROUP BY c.id
     ORDER BY c.name
   `).all()
@@ -239,6 +239,20 @@ router.post('/channels/:id/pull', async (req, res) => {
   }
 })
 
+// ─── Tamaño de carpeta ────────────────────────────────────────────────────────
+
+router.get('/folder-size', (req, res) => {
+  const { channel_id, path = '/' } = req.query
+  if (!channel_id) return res.status(400).json({ error: 'channel_id requerido' })
+  const prefix = path.endsWith('/') ? path : path + '/'
+  const row = db.prepare(`
+    SELECT COUNT(f.id) as count, SUM(f.size) as size
+    FROM files f
+    WHERE f.channel_id = ? AND (f.path = ? OR f.path LIKE ?) AND (f.part_num IS NULL OR f.part_num = 1)
+  `).get([channel_id, prefix, prefix + '%'])
+  res.json({ count: row.count || 0, size: row.size || 0 })
+})
+
 // ─── Archivos ─────────────────────────────────────────────────────────────────
 
 router.get('/files', async (req, res) => {
@@ -262,7 +276,7 @@ router.get('/files', async (req, res) => {
 
   const files = db.prepare(`
     SELECT f.*, c.name as channel_name,
-      COALESCE(f.part_name, f.name) as display_name,
+      COALESCE(f.alias, f.part_name, f.name) as display_name,
       CASE WHEN f.part_total IS NOT NULL THEN (
         SELECT SUM(p.size) FROM files p WHERE p.part_group = f.part_group
       ) ELSE f.size END as total_size
@@ -275,10 +289,11 @@ router.get('/files', async (req, res) => {
 
   const { guessType } = await import('./telegram.js')
   files.forEach(f => {
-    if (f.part_name) {
+    // alias tiene prioridad sobre todo
+    if (f.alias) f.name = f.alias
+    else if (f.part_name) {
       f.name = f.part_name
       f.size = f.total_size
-      // Re-derivar tipo del nombre original si quedó como 'other' por el .partN
       if (!f.type || f.type === 'other') f.type = guessType(f.mime_type, f.part_name)
     }
   })
@@ -307,8 +322,8 @@ router.get('/tree/:channel_id', (req, res) => {
 router.get('/search', (req, res) => {
   const { q, channel_id } = req.query
   if (!q) return res.json([])
-  let sql = `SELECT f.*, c.name as channel_name FROM files f JOIN channels c ON c.id = f.channel_id WHERE f.name LIKE ?`
-  const params = [`%${q}%`]
+  let sql = `SELECT f.*, COALESCE(f.alias, f.part_name, f.name) as display_name, c.name as channel_name FROM files f JOIN channels c ON c.id = f.channel_id WHERE (f.name LIKE ? OR f.alias LIKE ?)`
+  const params = [`%${q}%`, `%${q}%`]
   if (channel_id) { sql += ' AND f.channel_id = ?'; params.push(channel_id) }
   sql += ' LIMIT 100'
   res.json(db.prepare(sql).all(params))
@@ -346,14 +361,38 @@ router.delete('/files/:id', async (req, res) => {
 })
 
 router.patch('/files/:id', (req, res) => {
-  const { path: newPath } = req.body
-  if (!newPath) return res.status(400).json({ error: 'path requerido' })
+  const { path: newPath, name: newName } = req.body
   const file = db.prepare('SELECT * FROM files WHERE id = ?').get(req.params.id)
   if (!file) return res.status(404).json({ error: 'Archivo no encontrado' })
-  const normalized = newPath.replace(/\/?$/, '/').replace(/^([^/])/, '/$1')
-  db.prepare('UPDATE files SET path = ? WHERE id = ?').run([normalized, file.id])
+  if (newName !== undefined) {
+    db.prepare('UPDATE files SET alias = ? WHERE id = ?').run([newName.trim(), file.id])
+    if (file.part_group) db.prepare('UPDATE files SET alias = ? WHERE part_group = ?').run([newName.trim(), file.part_group])
+  }
+  if (newPath !== undefined) {
+    const normalized = newPath.replace(/\/?$/, '/').replace(/^([^/])/, '/$1')
+    db.prepare('UPDATE files SET path = ? WHERE id = ?').run([normalized, file.id])
+    if (file.part_group) db.prepare('UPDATE files SET path = ? WHERE part_group = ?').run([normalized, file.part_group])
+  }
   pushManifest(file.channel_id).catch(e => console.error('[sync] push error:', e.message))
-  res.json({ ok: true, id: file.id, path: normalized })
+  res.json({ ok: true })
+})
+
+// ─── Foto de canal ────────────────────────────────────────────────────────────
+
+router.get('/channels/:id/photo', async (req, res) => {
+  try {
+    const channel = db.prepare('SELECT * FROM channels WHERE id = ?').get(req.params.id)
+    if (!channel) return res.status(404).end()
+    const client = await getClient()
+    const entity = await getChannelEntity(channel.tg_id, channel.access_hash)
+    const photo = await client.downloadProfilePhoto(entity, { isBig: false })
+    if (!photo || !photo.length) return res.status(404).end()
+    res.setHeader('Content-Type', 'image/jpeg')
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+    res.send(Buffer.from(photo))
+  } catch (err) {
+    res.status(404).end()
+  }
 })
 
 // ─── Thumb / Preview ──────────────────────────────────────────────────────────
@@ -818,6 +857,31 @@ router.get('/folders', (req, res) => {
     return folderParent === parent
   })
   res.json(folders)
+})
+
+router.patch('/folders/rename', (req, res) => {
+  const { channel_id, old_path, new_name } = req.body
+  if (!channel_id || !old_path || !new_name) return res.status(400).json({ error: 'channel_id, old_path y new_name requeridos' })
+  const oldFull = old_path.endsWith('/') ? old_path : old_path + '/'
+  const parts = oldFull.replace(/\/$/, '').split('/')
+  parts[parts.length - 1] = new_name.replace(/[/\\]/g, '-').trim()
+  const newFull = parts.join('/') + '/'
+  const parentPrefix = parts.slice(0, -1).join('/') + '/'
+
+  // Renombrar carpeta y todas las subcarpetas
+  const folders = db.prepare("SELECT * FROM folders WHERE channel_id = ? AND (full_path = ? OR full_path LIKE ?)").all([channel_id, oldFull, oldFull + '%'])
+  for (const f of folders) {
+    const updated = f.full_path.replace(oldFull, newFull)
+    db.prepare('UPDATE folders SET full_path = ? WHERE id = ?').run([updated, f.id])
+  }
+  // Renombrar path de archivos
+  const files = db.prepare("SELECT * FROM files WHERE channel_id = ? AND (path = ? OR path LIKE ?)").all([channel_id, oldFull, oldFull + '%'])
+  for (const f of files) {
+    const updated = f.path.replace(oldFull, newFull)
+    db.prepare('UPDATE files SET path = ? WHERE id = ?').run([updated, f.id])
+  }
+  pushManifest(parseInt(channel_id)).catch(e => console.error('[sync] push error:', e.message))
+  res.json({ ok: true, new_path: newFull })
 })
 
 router.post('/folders', (req, res) => {

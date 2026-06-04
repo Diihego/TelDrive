@@ -77,6 +77,14 @@ export const api = {
     method: 'PATCH',
     body: JSON.stringify({ path: newPath }),
   }),
+  renameFile: (id, newName) => req('/files/' + id, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: newName }),
+  }),
+  renameFolder: (channelId, oldPath, newName) => req('/folders/rename', {
+    method: 'PATCH',
+    body: JSON.stringify({ channel_id: channelId, old_path: oldPath, new_name: newName }),
+  }),
 
   // Sync
   pushManifest: (id) => req('/channels/' + id + '/push', { method: 'POST' }),
@@ -91,6 +99,15 @@ export const api = {
   setupSendCode: (phone) => req('/setup/send-code', { method: 'POST', body: JSON.stringify({ phone }) }),
   setupSignIn: (code) => req('/setup/sign-in', { method: 'POST', body: JSON.stringify({ code }) }),
   setup2fa: (password) => req('/setup/2fa', { method: 'POST', body: JSON.stringify({ password }) }),
+
+  // Foto de canal
+  channelPhotoUrl: (id) => `${BASE}/channels/${id}/photo`,
+
+  // Tamaño de carpeta
+  getFolderSize: (channelId, path) => {
+    const qs = new URLSearchParams({ channel_id: channelId, path }).toString()
+    return req('/folder-size?' + qs)
+  },
 
   // Preferencias
   getPrefs: () => req('/prefs'),
