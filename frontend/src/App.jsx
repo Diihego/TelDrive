@@ -2,6 +2,81 @@ import React, { useState, useEffect, useCallback } from 'react' // teldrive
 import { api } from './lib/api.js'
 import { formatSize, getFileIcon, formatDate } from './lib/utils.js'
 
+// ─── Temas ────────────────────────────────────────────────────────────────────
+
+const THEMES = {
+  nebula: {
+    name: 'Nebula',
+    bg: '#0a0a0f', bg2: '#111118', bg3: '#1a1a24',
+    border: '#ffffff12', border2: '#ffffff20',
+    text: '#e8e8f0', text2: '#9090a8', text3: '#606075',
+    accent: '#6c63ff', accent2: '#3ecfcf', danger: '#ff4d6d',
+  },
+  obsidian: {
+    name: 'Obsidian',
+    bg: '#000000', bg2: '#0d0d0d', bg3: '#1a1a1a',
+    border: '#ffffff0e', border2: '#ffffff18',
+    text: '#f0f0f0', text2: '#888888', text3: '#555555',
+    accent: '#444444', accent2: '#cccccc', danger: '#ff3b3b',
+  },
+  aurora: {
+    name: 'Aurora',
+    bg: '#050f0a', bg2: '#0a1a10', bg3: '#0f2416',
+    border: '#00ff8812', border2: '#00ff8820',
+    text: '#d4f0dc', text2: '#7ab890', text3: '#3d6b4d',
+    accent: '#00c46a', accent2: '#00ff88', danger: '#ff4d6d',
+  },
+  dusk: {
+    name: 'Dusk',
+    bg: '#0f0818', bg2: '#160d22', bg3: '#1e1230',
+    border: '#ff880012', border2: '#ff880022',
+    text: '#f0deff', text2: '#a87fc0', text3: '#6b4d82',
+    accent: '#8b3dff', accent2: '#ff8800', danger: '#ff4455',
+  },
+  arctic: {
+    name: 'Arctic',
+    bg: '#f0f4f8', bg2: '#ffffff', bg3: '#e4eaf2',
+    border: '#00000010', border2: '#00000018',
+    text: '#1a2332', text2: '#4a6080', text3: '#8899aa',
+    accent: '#2060d0', accent2: '#0099cc', danger: '#e03030',
+  },
+  bloodmoon: {
+    name: 'Blood Moon',
+    bg: '#0f0505', bg2: '#180808', bg3: '#220c0c',
+    border: '#ff000012', border2: '#ff000020',
+    text: '#f5dada', text2: '#b07070', text3: '#6b3a3a',
+    accent: '#cc2200', accent2: '#ff4422', danger: '#ff0000',
+  },
+  pandemonium: {
+    name: 'Pandemonium',
+    bg: '#090909', bg2: '#121212', bg3: '#090909',
+    border: '#FF4A5818', border2: '#FF4A5830',
+    text: '#ffffff', text2: '#aaaaaa', text3: '#7a7a7a',
+    accent: '#FF4A58', accent2: '#FF4A58', danger: '#ff2244',
+  },
+  sakura: {
+    name: 'Sakura',
+    bg: '#fff5f8', bg2: '#ffffff', bg3: '#ffe8f0',
+    border: '#ff69b420', border2: '#ff69b435',
+    text: '#3a1a2a', text2: '#8a4a6a', text3: '#b888a0',
+    accent: '#e8458a', accent2: '#ff69b4', danger: '#e02050',
+  },
+}
+
+function applyTheme(key, save = false) {
+  const t = THEMES[key] || THEMES.nebula
+  const r = document.documentElement.style
+  r.setProperty('--bg', t.bg); r.setProperty('--bg2', t.bg2); r.setProperty('--bg3', t.bg3)
+  r.setProperty('--border', t.border); r.setProperty('--border2', t.border2)
+  r.setProperty('--text', t.text); r.setProperty('--text2', t.text2); r.setProperty('--text3', t.text3)
+  r.setProperty('--accent', t.accent); r.setProperty('--accent2', t.accent2); r.setProperty('--danger', t.danger)
+  document.body.style.background = t.bg
+  if (save) {
+    // Guardar en la DB del backend (localStorage no funciona desde file://)
+    import('./lib/api.js').then(({ api }) => api.setPrefs({ theme: key }).catch(() => {}))
+  }
+}
+
 // ─── Icons (inline SVG) ───────────────────────────────────────────────────────
 
 const Icon = ({ d, size = 18, stroke = 'currentColor' }) => (
@@ -22,12 +97,14 @@ const icons = {
   grid:      'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
   list:      'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   chevronR:  'M9 18l6-6-6-6',
+  chevronL:  'M15 18l-6-6 6-6',
   chevronD:  'M6 9l6 6 6-6',
   home:      'M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   x:         'M18 6 6 18M6 6l12 12',
   sync:      'M4 12a8 8 0 0 1 14.93-4M20 4v4h-4M20 12a8 8 0 0 1-14.93 4M4 20v-4h4',
   newfolder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2zM12 11v6M9 14h6',
   move:      'M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20',
+  palette:   'M12 2a10 10 0 1 0 0 20 4 4 0 0 1 0-8 10 10 0 0 0 0-12zM6.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3-5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z',
   edit:      'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
   channel:   'M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 13a19.8 19.8 0 0 1-3.07-8.67A2 2 0 0 1 3.06 2h3a2 2 0 0 1 2 1.72 12.8 12.8 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.8 12.8 0 0 0 2.81.7A2 2 0 0 1 21 16.92z',
 }
@@ -81,7 +158,7 @@ const css = `
     transition: width .2s ease; flex-shrink: 0;
   }
   .sidebar-tree-panel.visible { width: 200px; min-width: 200px; }
-  .sidebar-tree-panel.hidden { width: 0; min-width: 0; border-right: none; }
+  .sidebar-tree-panel.hidden { width: 20px; min-width: 20px; }
 
   .sidebar-header {
     padding: 16px 12px 10px;
@@ -171,7 +248,7 @@ const css = `
 
   .btn { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; display: flex; align-items: center; gap: 6px; transition: all .2s; }
   .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #5a53ee; }
+  .btn-primary:hover { filter: brightness(1.15); }
   .btn-ghost { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--text); border-color: var(--border2); }
   .btn-icon { padding: 7px; }
@@ -1485,6 +1562,110 @@ function SetupScreen({ onDone }) {
   )
 }
 
+// ─── Theme Modal ──────────────────────────────────────────────────────────────
+
+const CUSTOM_FIELDS = [
+  { key: 'bg',      label: 'Fondo principal' },
+  { key: 'bg2',     label: 'Fondo sidebar' },
+  { key: 'bg3',     label: 'Fondo hover' },
+  { key: 'text',    label: 'Texto principal' },
+  { key: 'text3',   label: 'Texto secundario' },
+  { key: 'accent',  label: 'Acento' },
+  { key: 'accent2', label: 'Acento 2' },
+  { key: 'danger',  label: 'Peligro' },
+]
+
+function ThemeModal({ activeTheme, onSelect, onClose }) {
+  const [tab, setTab] = React.useState('presets')
+  const [custom, setCustom] = React.useState(() => {
+    const base = THEMES[activeTheme] || THEMES.nebula
+    return Object.fromEntries(CUSTOM_FIELDS.map(f => [f.key, base[f.key] || '#000000']))
+  })
+
+  function previewCustom(c) {
+    const r = document.documentElement.style
+    r.setProperty('--bg', c.bg); r.setProperty('--bg2', c.bg2); r.setProperty('--bg3', c.bg3)
+    r.setProperty('--text', c.text); r.setProperty('--text2', c.text2 || c.text3); r.setProperty('--text3', c.text3)
+    r.setProperty('--accent', c.accent); r.setProperty('--accent2', c.accent2); r.setProperty('--danger', c.danger)
+    r.setProperty('--border', c.accent + '18'); r.setProperty('--border2', c.accent + '28')
+    document.body.style.background = c.bg
+  }
+
+  function saveCustom() {
+    THEMES.custom = { ...custom, name: 'Custom', border: custom.accent + '18', border2: custom.accent + '28', text2: custom.text3 }
+    onSelect('custom')
+    onClose()
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480, maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+        <h2 style={{ marginBottom: 12 }}>🎨 Tema</h2>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+          {[['presets','Temas'],['custom','Personalizado']].map(([t,label]) => (
+            <button key={t} className={`btn ${tab===t?'btn-primary':'btn-ghost'}`}
+              style={{ flex: 1, fontSize: 12 }} onClick={() => setTab(t)}>{label}</button>
+          ))}
+        </div>
+
+        {tab === 'presets' ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {Object.entries(THEMES).filter(([k]) => k !== 'custom' || THEMES.custom).map(([key, t]) => (
+                <div key={key} onClick={() => { onSelect(key); onClose() }}
+                  style={{ borderRadius: 10, padding: 12, cursor: 'pointer',
+                    border: `2px solid ${activeTheme === key ? t.accent2 : (t.border2||'#ffffff20')}`,
+                    background: t.bg2, transition: 'border-color .15s' }}>
+                  <div style={{ display: 'flex', gap: 5, marginBottom: 8 }}>
+                    {[t.bg3, t.accent, t.accent2, t.danger].map((c,i) => (
+                      <div key={i} style={{ width: 18, height: 18, borderRadius: 4, background: c }} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: t.text }}>{t.name}</div>
+                  {activeTheme === key && <div style={{ fontSize: 10, color: t.text3, marginTop: 2, fontFamily: 'var(--mono)' }}>✓ activo</div>}
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>Los cambios se previewean en tiempo real.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {CUSTOM_FIELDS.map(({ key, label }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input type="color" value={custom[key]}
+                    style={{ width: 36, height: 36, border: 'none', borderRadius: 8, cursor: 'pointer', padding: 2, background: 'none' }}
+                    onChange={e => { const u = {...custom,[key]:e.target.value}; setCustom(u); previewCustom(u) }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{custom[key]}</div>
+                  </div>
+                  <input type="text" value={custom[key]} className="modal-input"
+                    style={{ width: 90, fontSize: 12, fontFamily: 'var(--mono)', padding: '4px 8px' }}
+                    onChange={e => {
+                      const val = e.target.value
+                      if (/^#[0-9a-fA-F]{0,6}$/.test(val)) {
+                        const u = {...custom,[key]:val}; setCustom(u)
+                        if (val.length === 7) previewCustom(u)
+                      }
+                    }} />
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => { applyTheme(activeTheme); onClose() }}>Cancelar</button>
+              <button className="btn btn-primary" onClick={saveCustom}>Guardar tema</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1568,6 +1749,8 @@ function MainApp() {
 
   const [showAddChannel, setShowAddChannel] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [showThemes, setShowThemes] = useState(false)
+  const [activeTheme, setActiveTheme] = useState(localStorage.getItem('teldrive-theme') || 'nebula')
   const [channelsSidebarExpanded, setChannelsSidebarExpanded] = useState(false) // collapsed por defecto
   const [treeSidebarVisible, setTreeSidebarVisible] = useState(true)
   const [confirm, setConfirm] = useState(null) // { message, onConfirm }
@@ -1606,6 +1789,11 @@ function MainApp() {
   // Load channels & stats
   useEffect(() => {
     Promise.all([api.getChannels(), api.getPrefs()]).then(([chs, prefs]) => {
+      // Aplicar tema guardado
+      if (prefs.theme && THEMES[prefs.theme]) {
+        applyTheme(prefs.theme)
+        setActiveTheme(prefs.theme)
+      }
       const order = prefs['channel-order'] || []
       const defaultId = prefs['default-channel'] ? parseInt(prefs['default-channel']) : null
       setDefaultChannelId(defaultId)
@@ -2030,7 +2218,7 @@ function MainApp() {
                 </div>
                 <button style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: 4, display: 'flex' }}
                   title="Colapsar" onClick={() => setChannelsSidebarExpanded(false)}>
-                  <Icon d={icons.chevronR} size={14} />
+                  <Icon d={icons.chevronL} size={14} />
                 </button>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
@@ -2092,6 +2280,10 @@ function MainApp() {
                     <div>{formatSize(stats.total_size)}</div>
                   </div>
                 )}
+                <button style={{ marginTop: 10, background: 'none', border: '1px solid var(--border2)', borderRadius: 8, color: 'var(--text3)', cursor: 'pointer', padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}
+                  onClick={() => setShowThemes(true)}>
+                  <Icon d={icons.palette} size={13} /> Tema: {THEMES[activeTheme]?.name}
+                </button>
               </div>
             </>
           ) : (
@@ -2126,7 +2318,7 @@ function MainApp() {
 
         {/* ── Sidebar árbol ── */}
         <div className={`sidebar-tree-panel ${treeSidebarVisible ? 'visible' : 'hidden'}`}>
-          {treeSidebarVisible && (
+          {treeSidebarVisible ? (
             <>
               <div style={{ padding: '12px 10px 8px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '1.5px', fontFamily: 'var(--mono)' }}>
@@ -2134,7 +2326,7 @@ function MainApp() {
                 </span>
                 <button style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', padding: 2, display: 'flex' }}
                   title="Ocultar árbol" onClick={() => setTreeSidebarVisible(false)}>
-                  <Icon d={icons.chevronR} size={12} />
+                  <Icon d={icons.chevronL} size={12} />
                 </button>
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -2144,6 +2336,11 @@ function MainApp() {
                 }
               </div>
             </>
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              title="Mostrar árbol" onClick={() => setTreeSidebarVisible(true)}>
+              <Icon d={icons.chevronR} size={12} stroke="var(--text3)" />
+            </div>
           )}
         </div>
 
@@ -2374,16 +2571,13 @@ function MainApp() {
         </main>
       </div>
 
-      {/* Modals */}
       {showAddChannel && (
         <AddChannelModal
           onClose={() => setShowAddChannel(false)}
           onAdd={ch => setChannels(cs => [...cs, ch])}
         />
       )}
-      {previewFile && (
-        <Lightbox file={previewFile} onClose={() => setPreviewFile(null)} />
-      )}
+      {previewFile && <Lightbox file={previewFile} onClose={() => setPreviewFile(null)} />}
       {moveFile && activeChannel && (
         <MoveModal
           file={moveFile}
@@ -2397,11 +2591,7 @@ function MainApp() {
           channel={activeChannel}
           currentPath={currentPath}
           onClose={() => setShowNewFolder(false)}
-          onCreated={() => {
-            setShowNewFolder(false)
-            api.getTree(activeChannel.id).then(setTree)
-            setRefreshKey(k => k + 1)
-          }}
+          onCreated={() => { setShowNewFolder(false); api.getTree(activeChannel.id).then(setTree); setRefreshKey(k => k + 1) }}
         />
       )}
       {showUpload && (
@@ -2413,25 +2603,16 @@ function MainApp() {
           onUploaded={() => { if (activeChannel) api.getTree(activeChannel.id).then(setTree).catch(() => {}); setRefreshKey(k => k + 1) }}
         />
       )}
-
-      {previewFile && <Lightbox file={previewFile} onClose={() => setPreviewFile(null)} />}
-
       {renameItem && (
         <RenameModal
           item={renameItem.item}
           type={renameItem.type}
           channelId={activeChannel?.id}
           onClose={() => setRenameItem(null)}
-          onRenamed={() => {
-            setRenameItem(null)
-            if (renameItem.type === 'folder') api.getTree(activeChannel.id).then(setTree).catch(() => {})
-            setRefreshKey(k => k + 1)
-          }}
+          onRenamed={() => { setRenameItem(null); if (renameItem.type === 'folder') api.getTree(activeChannel.id).then(setTree).catch(() => {}); setRefreshKey(k => k + 1) }}
         />
       )}
-
       {dragOver && <div className='drop-hint'>Soltar para subir{dragOver !== 'content' ? ' en ' + dragOver : ''}</div>}
-
       {confirm && (
         <div className="overlay" onClick={() => setConfirm(null)}>
           <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
@@ -2441,14 +2622,18 @@ function MainApp() {
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setConfirm(null)}>Cancelar</button>
               <button className="btn" style={{ background: 'var(--danger, #ef4444)', color: '#fff' }}
-                onClick={() => { confirm.onConfirm(); setConfirm(null) }}>
-                Eliminar
-              </button>
+                onClick={() => { confirm.onConfirm(); setConfirm(null) }}>Eliminar</button>
             </div>
           </div>
         </div>
       )}
-
+      {showThemes && (
+        <ThemeModal
+          activeTheme={activeTheme}
+          onSelect={key => { applyTheme(key, true); setActiveTheme(key) }}
+          onClose={() => setShowThemes(false)}
+        />
+      )}
       {showCloseDialog && (
         <div className="overlay">
           <div className="modal" style={{ maxWidth: 340 }} onClick={e => e.stopPropagation()}>
@@ -2471,7 +2656,6 @@ function MainApp() {
           </div>
         </div>
       )}
-
       <TransferPanel />
       <Toasts />
     </>

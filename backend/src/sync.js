@@ -59,6 +59,24 @@ export function pushManifest(channelId) {
 }
 
 /**
+ * Push inmediato sin debounce — usar para borrados críticos.
+ */
+export async function pushManifestNow(channelId) {
+  // Cancelar cualquier debounce pendiente para este canal
+  if (pushTimers.has(channelId)) {
+    clearTimeout(pushTimers.get(channelId))
+    pushTimers.delete(channelId)
+  }
+  // Si ya hay uno corriendo, esperar a que termine
+  if (pushRunning.get(channelId)) {
+    try { await pushRunning.get(channelId) } catch (_) {}
+  }
+  const run = _pushManifest(channelId)
+  pushRunning.set(channelId, run)
+  return run.finally(() => pushRunning.delete(channelId))
+}
+
+/**
  * Sube el indice actual como JSON y elimina los manifests anteriores.
  */
 async function _pushManifest(channelId) {
@@ -186,32 +204,39 @@ export async function pullManifest(channelId) {
     return null
   }
 
-  // Sincronizar archivos
-  let imported = 0
+  // Reemplazo completo: borrar estado local del canal y re-insertar desde manifest
+  // Esto garantiza que ítems borrados en otros PCs no se restauren
+  const existingFiles = db.prepare('SELECT file_id, alias FROM files WHERE channel_id = ?').all(channelId)
+  const aliasMap = new Map(existingFiles.map(f => [f.file_id, f.alias]).filter(([, a]) => a))
+
+  db.prepare('DELETE FROM files WHERE channel_id = ?').run(channelId)
+  db.prepare('DELETE FROM folders WHERE channel_id = ?').run(channelId)
+
   const insertFile = db.prepare(`
-    INSERT OR IGNORE INTO files (channel_id, file_id, message_id, name, path, size, mime_type, type, date, part_group, part_num, part_total, part_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO files (channel_id, file_id, message_id, name, path, size, mime_type, type, date, part_group, part_num, part_total, part_name, alias)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
+  let imported = 0
   for (const f of manifest.files || []) {
+    // Preservar alias (renombres) aunque se reemplacen los datos del manifest
+    const alias = aliasMap.get(f.file_id) || null
     const result = insertFile.run([
       channelId, f.file_id, f.message_id, f.name,
       f.path, f.size, f.mime_type, f.type, f.date,
       f.part_group || null, f.part_num || null, f.part_total || null, f.part_name || null,
+      alias,
     ])
     if (result.changes > 0) imported++
   }
 
-  // Sincronizar carpetas
+  const insertFolder = db.prepare('INSERT OR IGNORE INTO folders (channel_id, full_path) VALUES (?, ?)')
   let foldersImported = 0
-  const insertFolder = db.prepare(
-    'INSERT OR IGNORE INTO folders (channel_id, full_path) VALUES (?, ?)'
-  )
   for (const folder of manifest.folders || []) {
     const result = insertFolder.run([channelId, folder.full_path])
     if (result.changes > 0) foldersImported++
   }
 
-  console.log('[sync] pull: ' + imported + ' archivos nuevos, ' + foldersImported + ' carpetas nuevas')
+  console.log('[sync] pull: ' + imported + ' archivos, ' + foldersImported + ' carpetas')
   return {
     files: (manifest.files || []).length,
     folders: (manifest.folders || []).length,

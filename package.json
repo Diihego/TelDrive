@@ -1,6 +1,6 @@
 {
   "name": "teldrive",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Tu cloud personal en Telegram",
   "private": true,
   "type": "module",

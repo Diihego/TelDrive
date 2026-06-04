@@ -1,7 +1,7 @@
 import express from 'express'
 import db from './db.js'
 import { getClient, resolveChannel, getChannelEntity } from './telegram.js'
-import { pushManifest, pullManifest } from './sync.js'
+import { pushManifest, pushManifestNow, pullManifest } from './sync.js'
 import { getThumb } from './thumb.js'
 import { indexChannel, startLiveIndexer } from './indexer.js'
 import { isConfigured, getSetupState, initSetup, sendCode, signIn, verify2fa } from './setup.js'
@@ -356,7 +356,7 @@ router.delete('/files/:id', async (req, res) => {
   } else {
     db.prepare('DELETE FROM files WHERE id = ?').run(req.params.id)
   }
-  pushManifest(file.channel_id).catch(e => console.error('[sync] push error:', e.message))
+  try { await pushManifestNow(file.channel_id) } catch (e) { console.error('[sync] push error:', e.message) }
   res.json({ ok: true })
 })
 
@@ -899,7 +899,7 @@ router.post('/folders', (req, res) => {
   }
 })
 
-router.delete('/folders/:id', (req, res) => {
+router.delete('/folders/:id', async (req, res) => {
   // Acepta id numérico o "bypath" con query ?channel_id=&path=
   const { channel_id, path: folderPath } = req.query
   let channelId, fullPath
@@ -931,7 +931,7 @@ router.delete('/folders/:id', (req, res) => {
   // Borrar del índice local
   db.prepare("DELETE FROM folders WHERE channel_id = ? AND (full_path = ? OR full_path LIKE ?)").run([channelId, fullPath, fullPath + '%'])
   db.prepare("DELETE FROM files WHERE channel_id = ? AND (path = ? OR path LIKE ?)").run([channelId, fullPath, fullPath + '%'])
-  pushManifest(channelId).catch(e => console.error('[sync] push error:', e.message))
+  try { await pushManifestNow(channelId) } catch (e) { console.error('[sync] push error:', e.message) }
   res.json({ ok: true })
 })
 
