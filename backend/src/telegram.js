@@ -8,7 +8,21 @@ let client = null
 export function resetClient() { client = null }
 
 export async function getClient() {
-  if (client && client.connected) return client
+  // Si el cliente existe pero se desconectó, intentar reconectar primero
+  if (client) {
+    if (client.connected) return client
+    try {
+      console.log('[TG] Reconectando cliente...')
+      await client.connect()
+      if (client.connected) {
+        console.log('[TG] Reconectado.')
+        return client
+      }
+    } catch (e) {
+      console.warn('[TG] Fallo reconexión, creando nuevo cliente:', e.message)
+    }
+    client = null
+  }
 
   const cfg = loadConfig()
   const useEnv = !process.env.TELDRIVE_DATA_DIR // en Electron, solo config.json
@@ -20,7 +34,7 @@ export async function getClient() {
   client = new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 10,
     retryDelay: 1000,
-    timeout: 120,        // 2 minutos por request
+    timeout: 120,
     requestRetries: 5,
   })
 
@@ -100,6 +114,7 @@ export function guessType(mimeType, name) {
   if (['mp3','ogg','wav','flac','m4a'].includes(ext) || (mimeType||'').startsWith('audio/')) return 'audio'
   if (['pdf'].includes(ext)) return 'pdf'
   if (['zip','rar','7z','tar','gz'].includes(ext)) return 'archive'
+  if (['psd','psb','ai','xd','sketch','fig'].includes(ext)) return 'design'
   if (['ztl','zbp','zmt'].includes(ext)) return 'ztl'
   if (['zpr'].includes(ext)) return 'zpr'
   if (['stl','obj','fbx','gltf','glb','3mf','ply','dae','blend','ma','mb','c4d','max'].includes(ext)) return '3d'

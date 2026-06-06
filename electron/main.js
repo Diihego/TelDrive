@@ -150,6 +150,24 @@ function createWindow() {
   })
 }
 
+// ─── IPC: folder picker + open path ──────────────────────────────────────────
+
+ipcMain.handle('choose-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Elegir carpeta de descargas',
+  })
+  return result.canceled ? null : result.filePaths[0]
+})
+
+ipcMain.handle('open-path', async (_, p) => {
+  await shell.openPath(p)
+})
+
+ipcMain.handle('show-item-in-folder', (_, p) => {
+  shell.showItemInFolder(p)
+})
+
 // ─── Tray ─────────────────────────────────────────────────────────────────────
 
 function createTray() {

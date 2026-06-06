@@ -25,6 +25,10 @@ const downloadJobs = new Map() // jobId → { status, progress, speed, name, siz
 const DOWNLOAD_TMP = path.join(os.tmpdir(), 'teldrive-downloads')
 fs.mkdirSync(DOWNLOAD_TMP, { recursive: true })
 
+// Las sesiones 'preparing' quedaron incompletas — limpiarlas para que el frontend las reencole
+// Las 'ready' se conservan: el archivo tmp sigue ahí y se puede guardar directo
+try { db.prepare(`DELETE FROM download_sessions WHERE status='preparing'`).run() } catch {}
+
 function setDJob(jobId, data) {
   downloadJobs.set(jobId, { ...(downloadJobs.get(jobId) || {}), ...data })
 }
@@ -170,7 +174,13 @@ router.post('/channels', async (req, res) => {
     const channel = (result.lastInsertRowid &&
       db.prepare('SELECT * FROM channels WHERE id = ?').get(result.lastInsertRowid)) ||
       db.prepare('SELECT * FROM channels WHERE tg_id = ?').get(tgId)
-    res.json(channel || { tg_id: tgId, name, ok: true })
+
+    // Detectar si es canal ajeno (no owner/admin) — no podrá descargar archivos
+    const isOwner = entity.creator === true
+    const isAdmin = entity.adminRights && (entity.adminRights.postMessages || entity.adminRights.deleteMessages)
+    const canDownload = isOwner || isAdmin
+
+    res.json({ ...(channel || { tg_id: tgId, name, ok: true }), canDownload, warning: canDownload ? null : 'Este canal es ajeno. Podés ver los archivos pero no descargarlos a menos que seas administrador.' })
     if (channel && channel.id) {
       pullManifest(channel.id).catch(e => console.error('[sync] pull error:', e.message))
     }
@@ -215,6 +225,8 @@ router.post('/channels/:id/index', async (req, res) => {
   try {
     const result = await indexChannel(parseInt(req.params.id))
     res.json(result)
+    // Actualizar manifest después de indexar para que otros PCs reciban los cambios
+    pushManifest(parseInt(req.params.id)).catch(e => console.error('[index] push error:', e.message))
   } catch (err) {
     console.error('[index] Error:', err)
     res.status(500).json({ error: err.message, stack: err.stack })
@@ -436,16 +448,16 @@ router.get('/preview/:file_id', async (req, res) => {
 // ─── Download ─────────────────────────────────────────────────────────────────
 
 // Descarga resumable de un mensaje de Telegram a un archivo en disco
-async function downloadToFile(client, message, destPath, onProgress) {
+async function downloadToFile(clientIn, message, destPath, onProgress) {
   const { Api } = await import('telegram')
+  let client = clientIn  // mutable: se renueva si se desconecta
   const doc = message.media?.document
   if (!doc) throw new Error('El mensaje no tiene documento')
 
-  const CHUNK = 1024 * 1024  // 1 MB — máximo de Telegram
-  const PARALLEL = 4          // chunks simultáneos
+  const CHUNK    = 1024 * 1024  // 1 MB — máximo del protocolo MTProto
+  const PARALLEL = 2             // óptimo según pruebas: mínimo flood wait, máxima velocidad
   const progressPath = destPath + '.progress'
 
-  // Leer offset previo si existe (reanudación)
   let offset = 0
   if (fs.existsSync(progressPath) && fs.existsSync(destPath)) {
     offset = parseInt(fs.readFileSync(progressPath, 'utf8') || '0') || 0
@@ -474,37 +486,40 @@ async function downloadToFile(client, message, destPath, onProgress) {
       } catch (err) {
         console.warn(`[download] GetFile intento ${attempt}/8 offset=${chunkOffset}: ${err.message}`)
         if (attempt >= 8) throw err
-        await new Promise(r => setTimeout(r, 2000 * attempt))
+        const isDisconnect = /not connected|disconnected|connection/i.test(err.message || '')
+        if (isDisconnect) {
+          console.log('[download] Conexión perdida, reconectando...')
+          try { client = await getClient() } catch (e) { console.warn('[download] Error reconectando:', e.message) }
+          await new Promise(r => setTimeout(r, 2000))
+          continue
+        }
+        const floodMatch = err.message?.match(/FLOOD_WAIT_(\d+)/) || err.message?.match(/flood wait[^0-9]*(\d+)/i)
+        const waitMs = floodMatch
+          ? parseInt(floodMatch[1]) * 1000 + 1000
+          : Math.min(30000, 500 * Math.pow(2, attempt - 1))
+        await new Promise(r => setTimeout(r, waitMs))
       }
     }
   }
 
   try {
     while (true) {
-      // Pedir PARALLEL chunks en paralelo
       const offsets = []
-      for (let i = 0; i < PARALLEL; i++) {
-        offsets.push(offset + i * CHUNK)
-      }
+      for (let i = 0; i < PARALLEL; i++) offsets.push(offset + i * CHUNK)
 
       const results = await Promise.all(offsets.map(o => fetchChunk(o)))
 
       let done = false
       for (const bytes of results) {
         if (!bytes || bytes.length === 0) { done = true; break }
-
         const ok = ws.write(bytes)
         if (!ok) await new Promise(r => ws.once('drain', r))
-
         offset += bytes.length
         onProgress(bytes.length)
-
-        if (bytes.length < CHUNK) { done = true; break } // último chunk
+        if (bytes.length < CHUNK) { done = true; break }
       }
 
-      // Guardar progreso cada ~10MB
       fs.writeFileSync(progressPath, String(offset))
-
       if (done) break
     }
 
@@ -600,8 +615,12 @@ router.get('/download-sessions/active', (req, res) => {
 
 // 1) Iniciar preparación: descarga de Telegram → disco local
 router.post('/download-prepare/:file_id', async (req, res) => {
-  const file = db.prepare('SELECT * FROM files WHERE id = ?').get(req.params.file_id)
-  if (!file) return res.status(404).json({ error: 'Archivo no encontrado' })
+  const fileId = parseInt(req.params.file_id)
+  const file = db.prepare('SELECT * FROM files WHERE id = ?').get(fileId)
+  if (!file) {
+    console.error('[download] Archivo ID', fileId, 'no encontrado en DB. Total archivos:', db.prepare('SELECT COUNT(*) as n FROM files').get()?.n)
+    return res.status(404).json({ error: 'Archivo no encontrado (ID: ' + fileId + ')' })
+  }
 
   const jobId = crypto.randomUUID()
   const fileName = file.part_name || file.name
@@ -657,9 +676,11 @@ router.post('/download-prepare/:file_id', async (req, res) => {
     }
 
     async function downloadPart(f, partPath) {
-      const messages = await client.getMessages(entity, { ids: [f.message_id] })
-      if (!messages[0]) throw new Error('Mensaje no encontrado: ' + f.message_id)
-      await downloadToFile(client, messages[0], partPath, updateProgress)
+      const c = await getClient()  // siempre obtener cliente fresco (reconecta si hace falta)
+      const messages = await c.getMessages(entity, { ids: [f.message_id] })
+      if (!messages[0]) throw new Error('Mensaje no encontrado. Si no sos admin del canal, Telegram puede restringir el acceso a los archivos.')
+      if (!messages[0].media) throw new Error('Sin acceso al archivo. Para descargar desde canales ajenos necesitás ser administrador con permisos de descarga.')
+      await downloadToFile(c, messages[0], partPath, updateProgress)
     }
 
     try {
@@ -669,9 +690,9 @@ router.post('/download-prepare/:file_id', async (req, res) => {
         const partPath = path.join(DOWNLOAD_TMP, `${jobId}_part${partNum}`)
         partPaths.push(partPath)
         setDJob(jobId, { part: partNum, partTotal: filesToStream.length })
-        console.log(`[download] bajando parte ${partNum}/${filesToStream.length}...`)
+        console.log(`[download] bajando parte ${partNum}/${filesToStream.length}... [${new Date().toLocaleTimeString()}]`)
         await downloadPart(filesToStream[i], partPath)
-        console.log(`[download] parte ${partNum} lista`)
+        console.log(`[download] parte ${partNum} lista [${new Date().toLocaleTimeString()}]`)
       }
 
       // 2. Concatenar todas las partes en el archivo final
@@ -753,6 +774,37 @@ router.get('/download-serve/:jobId', (req, res) => {
       downloadJobs.delete(req.params.jobId)
       db.prepare(`DELETE FROM download_sessions WHERE job_id=?`).run(req.params.jobId)
     }
+  })
+})
+
+// 4) Cancelar descarga en curso
+router.delete('/download-prepare/:jobId', (req, res) => {
+  const { jobId } = req.params
+  const job = downloadJobs.get(jobId)
+  if (job) {
+    setDJob(jobId, { status: 'cancelled' })
+    if (job.tmpPath) fs.unlink(job.tmpPath, () => {})
+    downloadJobs.delete(jobId)
+    db.prepare(`DELETE FROM download_sessions WHERE job_id=?`).run(jobId)
+  }
+  res.json({ ok: true })
+})
+
+// 5) Guardar archivo ya listo en una carpeta de destino (carpeta default)
+router.post('/download-save/:jobId', (req, res) => {
+  const { targetDir, fileName } = req.body
+  const job = downloadJobs.get(req.params.jobId)
+  if (!job || job.status !== 'ready') return res.status(404).json({ error: 'Archivo no disponible' })
+  if (!fs.existsSync(job.tmpPath)) return res.status(404).json({ error: 'Archivo expirado' })
+  if (!targetDir) return res.status(400).json({ error: 'targetDir requerido' })
+
+  const dest = path.join(targetDir, fileName || job.name)
+  fs.copyFile(job.tmpPath, dest, (err) => {
+    if (err) return res.status(500).json({ error: err.message })
+    fs.unlink(job.tmpPath, () => {})
+    downloadJobs.delete(req.params.jobId)
+    db.prepare(`DELETE FROM download_sessions WHERE job_id=?`).run(req.params.jobId)
+    res.json({ ok: true, path: dest })
   })
 })
 

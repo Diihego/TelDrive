@@ -176,6 +176,7 @@ const css = `
   .tree-node { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree-node:hover { background: var(--bg3); color: var(--text); }
   .tree-node.active { background: var(--accent)22; color: var(--accent2); }
+  .tree-node.drop-over { background: var(--accent)33; border: 1px solid var(--accent2); }
   .tree-node .tree-toggle { flex-shrink: 0; color: var(--text3); display: flex; align-items: center; }
   .tree-node .tree-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 
@@ -227,14 +228,24 @@ const css = `
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
   .topbar {
-    padding: 14px 24px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 12px; background: var(--bg2);
+    display: flex; flex-direction: column;
+    background: var(--bg2); border-bottom: 1px solid var(--border);
   }
-  .breadcrumb { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
-  .breadcrumb-item { font-size: 13px; color: var(--text2); cursor: pointer; }
-  .breadcrumb-item:hover { color: var(--text); }
-  .breadcrumb-item.current { color: var(--text); font-weight: 600; }
-  .breadcrumb-sep { color: var(--text3); }
+  .topbar-actions {
+    padding: 8px 16px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-actions .search-box { flex: 1; min-width: 0; max-width: 320px; }
+  .topbar-spacer { flex: 1; }
+  .topbar-breadcrumb {
+    padding: 5px 16px; display: flex; align-items: center; gap: 6px;
+    background: var(--bg); min-height: 30px;
+  }
+  .breadcrumb { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; overflow: hidden; }
+  .breadcrumb-item { font-size: 12px; color: var(--text3); cursor: pointer; white-space: nowrap; }
+  .breadcrumb-item:hover { color: var(--text2); }
+  .breadcrumb-item.current { color: var(--text2); font-weight: 600; }
+  .breadcrumb-sep { color: var(--text3); opacity: 0.5; }
 
   .search-box {
     display: flex; align-items: center; gap: 8px;
@@ -337,6 +348,9 @@ const css = `
   .folder-card:hover .folder-del { opacity: 1; }
   .file-checkbox { position: absolute; top: 6px; left: 6px; z-index: 3; opacity: 0; transition: opacity .15s; accent-color: var(--accent2); width: 15px; height: 15px; cursor: pointer; }
   .file-card:hover .file-checkbox, .file-checkbox:checked { opacity: 1; }
+  .select-mode .file-checkbox { opacity: 0.4; }
+  .select-mode .file-card:hover .file-checkbox, .select-mode .file-checkbox:checked { opacity: 1; }
+  .select-mode .file-row .file-checkbox { opacity: 0.4; }
   .file-card.selected { border-color: var(--accent2); background: var(--accent)18; }
   .selection-bar { position: sticky; top: 0; z-index: 10; background: var(--bg2); border: 1px solid var(--accent2); border-radius: 10px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .selection-bar span { font-size: 13px; font-weight: 500; flex: 1; }
@@ -399,7 +413,7 @@ const css = `
   .progress-bar { height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden; }
   .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .3s; }
 
-  /* Transfer panel */
+  /* Transfer panel (solo uploads) */
   .transfer-panel {
     position: fixed; bottom: 24px; left: 24px; z-index: 300;
     display: flex; flex-direction: column; gap: 8px; max-width: 340px; width: 100%;
@@ -415,6 +429,63 @@ const css = `
   .transfer-bar-track { height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
   .transfer-bar-fill { height: 100%; border-radius: 2px; transition: width .3s; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
   .transfer-meta { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--mono); color: var(--text3); }
+
+  /* Download Manager Panel */
+  .dl-btn { position: relative; }
+  .dl-badge {
+    position: absolute; top: -4px; right: -4px;
+    background: var(--accent); color: #fff;
+    font-size: 9px; font-family: var(--mono); font-weight: 700;
+    min-width: 16px; height: 16px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; padding: 0 3px;
+    pointer-events: none;
+  }
+  .dl-dot {
+    position: absolute; top: -3px; right: -3px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #22c55e; border: 2px solid var(--bg2);
+    pointer-events: none; animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+
+  .dl-panel {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 500;
+    width: 340px; background: var(--bg2); border: 1px solid var(--border2);
+    border-radius: 14px; box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+    overflow: hidden; animation: slideIn .15s ease;
+  }
+  .dl-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 700; color: var(--text);
+  }
+  .dl-folder-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--text3); cursor: pointer; transition: background .15s;
+  }
+  .dl-folder-row:hover { background: var(--bg3); }
+  .dl-folder-path { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+  .dl-section { padding: 6px 0; }
+  .dl-section-label {
+    padding: 4px 14px; font-size: 9px; font-family: var(--mono);
+    text-transform: uppercase; letter-spacing: 1.5px; color: var(--text3);
+  }
+  .dl-item {
+    padding: 8px 14px; display: flex; flex-direction: column; gap: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dl-item:last-child { border-bottom: none; }
+  .dl-item-row { display: flex; align-items: center; gap: 6px; }
+  .dl-item-name { flex: 1; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .dl-item-status { font-size: 10px; font-family: var(--mono); white-space: nowrap; }
+  .dl-item-bar { height: 3px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .dl-item-bar-fill { height: 100%; border-radius: 2px; transition: width .3s; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .dl-item-meta { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--mono); color: var(--text3); }
+  .dl-empty { padding: 24px; text-align: center; font-size: 12px; color: var(--text3); }
+  .dl-scroll { max-height: 360px; overflow-y: auto; }
+  .dl-scroll::-webkit-scrollbar { width: 4px; }
+  .dl-scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 
   /* Toast */
   .toast-container { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 200; }
@@ -432,8 +503,10 @@ const css = `
   @media (max-width: 640px) {
     .sidebar-channels.expanded { width: 180px; min-width: 180px; }
     .sidebar-tree-panel.visible { width: 160px; min-width: 160px; }
-    .topbar { padding: 10px 14px; gap: 8px; }
-    .search-box { min-width: 120px; }
+    .topbar-actions { padding: 8px 10px; gap: 6px; }
+    .topbar-breadcrumb { padding: 4px 10px; }
+    .topbar-actions .search-box { max-width: 160px; }
+    .search-box { min-width: 100px; }
     .content { padding: 14px; }
     .file-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
     .file-row { grid-template-columns: 28px 1fr 80px; }
@@ -480,10 +553,12 @@ function formatETA(bytes, bps) {
 function TransferPanel() {
   const [transfers, setTransfers] = useState([])
   _setTransfers = setTransfers
-  if (!transfers.length) return null
+  // Solo mostrar uploads — las descargas van al DownloadManager
+  const uploads = transfers.filter(t => t.type === 'upload')
+  if (!uploads.length) return null
   return (
     <div className="transfer-panel">
-      {transfers.map(t => {
+      {uploads.map(t => {
         const isDone = t.status === 'done'
         const isError = t.status === 'error'
         const pct = t.progress || 0
@@ -515,6 +590,322 @@ function TransferPanel() {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ─── Download Queue System ────────────────────────────────────────────────────
+
+let _setDlItems = null
+let _dlDefaultFolder = null  // actualizado desde MainApp
+
+const dlStore = { items: [], hasNew: false }
+
+function dlSetItems(updater) {
+  dlStore.items = typeof updater === 'function' ? updater(dlStore.items) : updater
+  _setDlItems && _setDlItems([...dlStore.items])
+}
+
+function dlEnqueue(file) {
+  const id = crypto.randomUUID()
+  dlSetItems(prev => [...prev, { id, file, status: 'pending', progress: 0, speed: 0, part: 1, partTotal: 1 }])
+  dlProcessNext()
+  return id
+}
+
+let _dlProcessing = false
+let _dlCancelActive = null  // función para cancelar el item activo
+
+function dlRetry(item) {
+  dlSetItems(prev => prev.filter(i => i.id !== item.id))
+  dlEnqueue(item.file)
+}
+
+function dlNotify(fileName) {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+      new Notification('TelDrive — Descarga completa', { body: fileName, silent: true })
+    }
+  } catch {}
+}
+
+async function dlProcessNext() {
+  if (_dlProcessing) return
+  const next = dlStore.items.find(i => i.status === 'pending')
+  if (!next) return
+
+  _dlProcessing = true
+  dlSetItems(prev => prev.map(i => i.id === next.id ? { ...i, status: 'active' } : i))
+
+  let cancelled = false
+  let sseRef = null
+
+  _dlCancelActive = () => {
+    cancelled = true
+    sseRef?.close()
+    // Cancelar en backend si ya tenemos jobId
+    const item = dlStore.items.find(i => i.id === next.id)
+    if (item?.jobId) api.downloadCancel(item.jobId).catch(() => {})
+    dlSetItems(prev => prev.map(i => i.id === next.id ? { ...i, status: 'cancelled' } : i))
+    _dlProcessing = false
+    _dlCancelActive = null
+    dlProcessNext()
+  }
+
+  try {
+    const fileName = next.file.part_name || next.file.name
+
+    // Verificar sesión existente
+    const session = await api.downloadSession(next.file.id)
+    let jobId
+
+    if (session.status === 'ready') {
+      jobId = session.jobId
+    } else if (session.status === 'preparing') {
+      jobId = session.jobId
+      dlSetItems(prev => prev.map(i => i.id === next.id ? { ...i, jobId } : i))
+    } else {
+      const prepared = await api.downloadPrepare(next.file.id)
+      jobId = prepared.jobId
+      dlSetItems(prev => prev.map(i => i.id === next.id ? { ...i, jobId } : i))
+    }
+
+    if (cancelled) return
+
+    // Seguir progreso por SSE
+    if (session.status !== 'ready') {
+      await new Promise((resolve, reject) => {
+        const sse = new EventSource(api.downloadProgressUrl(jobId))
+        sseRef = sse
+        sse.onmessage = (e) => {
+          if (cancelled) { sse.close(); return }
+          const d = JSON.parse(e.data)
+          dlSetItems(prev => prev.map(i => i.id === next.id
+            ? { ...i, progress: d.progress, speed: d.speed, part: d.part, partTotal: d.partTotal }
+            : i))
+          if (d.status === 'ready') { sse.close(); resolve() }
+          if (d.status === 'error') { sse.close(); reject(new Error(d.error || 'Error al preparar')) }
+        }
+        sse.onerror = () => { sse.close(); reject(new Error('Conexión perdida')) }
+      })
+    }
+
+    if (cancelled) return
+
+    // Guardar o servir
+    if (_dlDefaultFolder) {
+      const saveResult = await api.downloadSave(jobId, _dlDefaultFolder, fileName)
+      dlSetItems(prev => prev.map(i => i.id === next.id
+        ? { ...i, status: 'saved', progress: 100, speed: 0, savedPath: saveResult.path || _dlDefaultFolder }
+        : i))
+      dlNotify(fileName)
+    } else {
+      const a = document.createElement('a')
+      a.href = api.downloadServeUrl(jobId)
+      a.download = fileName
+      a.click()
+      dlSetItems(prev => prev.map(i => i.id === next.id
+        ? { ...i, status: 'done', progress: 100, speed: 0 }
+        : i))
+      dlNotify(fileName)
+    }
+    dlStore.hasNew = true
+    _setDlItems && _setDlItems([...dlStore.items])
+
+  } catch (e) {
+    if (!cancelled) {
+      dlSetItems(prev => prev.map(i => i.id === next.id ? { ...i, status: 'error', error: e.message } : i))
+    }
+  }
+
+  _dlProcessing = false
+  _dlCancelActive = null
+  // Cooldown entre descargas — da tiempo a Telegram para limpiar el rate limit
+  await new Promise(r => setTimeout(r, 3000))
+  dlProcessNext()
+}
+
+function DownloadManager({ defaultFolder, onChangeFolder }) {
+  const [items, setItems] = useState([])
+  const [open, setOpen] = useState(false)
+  const [hasNew, setHasNew] = useState(false)
+  const ref = React.useRef()
+
+  _setDlItems = (newItems) => {
+    setItems(newItems)
+    if (dlStore.hasNew) setHasNew(true)
+  }
+
+  // Cerrar al hacer click fuera
+  React.useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  React.useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
+  }, [])
+
+  function openPanel() {
+    setOpen(o => !o)
+    if (dlStore.hasNew) { dlStore.hasNew = false; setHasNew(false) }
+  }
+
+  const active = items.filter(i => i.status === 'active')
+  const pending = items.filter(i => i.status === 'pending')
+  const history = items.filter(i => ['done','saved','error','cancelled'].includes(i.status))
+  const inProgress = active.length + pending.length
+
+  return (
+    <div className="dl-btn" ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn btn-ghost btn-icon"
+        title="Descargas"
+        onClick={openPanel}
+        style={{ position: 'relative' }}
+      >
+        <Icon d={icons.download} size={14} />
+        {inProgress > 0 && <span className="dl-badge">{inProgress}</span>}
+        {hasNew && inProgress === 0 && <span className="dl-dot" />}
+      </button>
+
+      {open && (
+        <div className="dl-panel">
+          <div className="dl-panel-header">
+            <span>⬇️ Descargas</span>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {history.length > 0 && (
+                <button onClick={() => dlSetItems(prev => prev.filter(i => !['done','saved','error','cancelled'].includes(i.status)))}
+                  style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 11, cursor: 'pointer' }}>
+                  Limpiar
+                </button>
+              )}
+              <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>✕</button>
+            </div>
+          </div>
+
+          {/* Carpeta default */}
+          <div className="dl-folder-row" onClick={onChangeFolder} title="Cambiar carpeta de descarga">
+            <span style={{ fontSize: 14 }}>📁</span>
+            <span className="dl-folder-path">
+              {defaultFolder || 'Sin carpeta — preguntará al descargar'}
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--accent2)', flexShrink: 0 }}>
+              {defaultFolder ? 'Cambiar' : 'Elegir'}
+            </span>
+          </div>
+
+          <div className="dl-scroll">
+            {items.length === 0 && (
+              <div className="dl-empty">No hay descargas</div>
+            )}
+
+            {/* Activo */}
+            {active.map(item => (
+              <DlItem key={item.id} item={item} onCancel={() => _dlCancelActive && _dlCancelActive()} />
+            ))}
+
+            {/* Cola */}
+            {pending.length > 0 && (
+              <div className="dl-section">
+                <div className="dl-section-label">En cola ({pending.length})</div>
+                {pending.map(item => (
+                  <DlItem key={item.id} item={item}
+                    onCancel={() => dlSetItems(prev => prev.filter(i => i.id !== item.id))} />
+                ))}
+              </div>
+            )}
+
+            {/* Historial */}
+            {history.length > 0 && (
+              <div className="dl-section">
+                <div className="dl-section-label">Completados</div>
+                {history.map(item => (
+                  <DlItem key={item.id} item={item}
+                    onRetry={item.status === 'error' ? () => dlRetry(item) : undefined}
+                    onRemove={() => dlSetItems(prev => prev.filter(i => i.id !== item.id))} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DlItem({ item, onCancel, onRetry, onRemove }) {
+  const fileName = item.file?.part_name || item.file?.name || item.file?.name || '—'
+  const isDone = item.status === 'done' || item.status === 'saved'
+  const isError = item.status === 'error'
+  const isCancelled = item.status === 'cancelled'
+  const isActive = item.status === 'active'
+  const isPending = item.status === 'pending'
+
+  const statusColor = isDone ? '#22c55e' : isError ? 'var(--danger)' : isCancelled ? 'var(--text3)' : 'var(--text2)'
+  const statusText = isDone
+    ? (item.status === 'saved' ? '✓ guardado' : '✓ listo')
+    : isError ? '✗ error'
+    : isCancelled ? 'cancelado'
+    : isPending ? 'en cola'
+    : `${item.progress || 0}%`
+
+  return (
+    <div className="dl-item">
+      <div className="dl-item-row">
+        <span style={{ fontSize: 13, flexShrink: 0 }}>
+          {isDone ? '✅' : isError ? '❌' : isCancelled ? '⊘' : isPending ? '⏳' : '⬇️'}
+        </span>
+        <span className="dl-item-name" title={fileName}>{fileName}</span>
+        {item.file?.size > 0 && <span style={{ fontSize: 9, color: 'var(--text3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>{formatSize(item.file.size)}</span>}
+        <span className="dl-item-status" style={{ color: statusColor }}>{statusText}</span>
+        {(isActive || isPending) && onCancel && (
+          <button onClick={onCancel} title="Cancelar"
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✕</button>
+        )}
+        {isError && onRetry && (
+          <button onClick={onRetry} title="Reintentar"
+            style={{ background: 'none', border: 'none', color: 'var(--accent2)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>↺</button>
+        )}
+        {(isDone || isError || isCancelled) && onRemove && (
+          <button onClick={onRemove} title="Quitar"
+            style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}>✕</button>
+        )}
+      </div>
+
+      {isActive && (
+        <>
+          <div className="dl-item-bar">
+            <div className="dl-item-bar-fill" style={{ width: (item.progress || 0) + '%' }} />
+          </div>
+          <div className="dl-item-meta">
+            <span>{formatSpeed(item.speed)}</span>
+            <span>
+              {item.speed > 0 && item.file?.size
+                ? 'ETA ' + formatETA(item.file.size * (1 - (item.progress || 0) / 100), item.speed)
+                : item.partTotal > 1 ? `Parte ${item.part}/${item.partTotal}` : ''}
+            </span>
+          </div>
+        </>
+      )}
+
+      {isDone && item.savedPath && (
+        <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.savedPath}</span>
+          <button onClick={() => window.electronAPI?.showItemInFolder(item.savedPath)}
+            title="Mostrar en carpeta"
+            style={{ background: 'none', border: 'none', color: 'var(--accent2)', cursor: 'pointer', fontSize: 11, flexShrink: 0 }}>
+            📂
+          </button>
+        </div>
+      )}
+
+      {isError && (
+        <div style={{ fontSize: 10, color: 'var(--danger)', fontFamily: 'var(--mono)' }}>{item.error}</div>
+      )}
     </div>
   )
 }
@@ -573,7 +964,11 @@ function AddChannelModal({ onClose, onAdd }) {
     try {
       const ch = await api.addChannel(target)
       onAdd(ch)
-      toast('Canal agregado: ' + ch.name, 'success')
+      if (ch.warning) {
+        toast('Canal agregado: ' + ch.name + ' ⚠️ ' + ch.warning, 'info')
+      } else {
+        toast('Canal agregado: ' + ch.name, 'success')
+      }
       onClose()
     } catch (e) { toast(e.message, 'error') }
     finally { setLoading(false) }
@@ -1059,22 +1454,52 @@ function LazyThumb({ fileId, icon }) {
 function FileCard({ file, view, onDownload, onMove, onDelete, onRename, onPreview, selected, onSelect, selectMode, onEnterSelect }) {
   const color = TYPE_COLOR_MAP[file.type] || '#64748b'
   const holdRef = React.useRef(null)
+  const startPos = React.useRef(null)
+  const suppressNextClick = React.useRef(false)
+  const HOLD_MS = 1000
+  const MOVE_THRESHOLD = 10
+
+  function cancelHold() {
+    if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null }
+    startPos.current = null
+  }
 
   function handlePointerDown(e) {
     if (selectMode) return
+    // Solo botón principal
+    if (e.button !== undefined && e.button !== 0) return
+    startPos.current = { x: e.clientX, y: e.clientY }
     holdRef.current = setTimeout(() => {
       holdRef.current = null
+      startPos.current = null
+      suppressNextClick.current = true // evitar que el pointerUp dispare click y deseleccione
       onEnterSelect && onEnterSelect(file.id)
-    }, 500)
+    }, HOLD_MS)
   }
-  function handlePointerUp() {
-    if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null }
+
+  function handlePointerMove(e) {
+    if (!holdRef.current || !startPos.current) return
+    const dx = Math.abs(e.clientX - startPos.current.x)
+    const dy = Math.abs(e.clientY - startPos.current.y)
+    if (dx > MOVE_THRESHOLD || dy > MOVE_THRESHOLD) cancelHold() // se movió → es drag, no hold
   }
-  function handlePointerLeave() {
-    if (holdRef.current) { clearTimeout(holdRef.current); holdRef.current = null }
-  }
+
+  function handlePointerUp() { cancelHold() }
+  function handlePointerLeave() { cancelHold() }
+
   function handleCardClick(e) {
-    if (selectMode) { onSelect && onSelect(file.id); return }
+    if (suppressNextClick.current) { suppressNextClick.current = false; return }
+    if (selectMode) { onSelect && onSelect(file.id) }
+  }
+
+  function handleCheckboxChange(e) {
+    e.stopPropagation()
+    if (!selectMode) {
+      // Click en checkbox sin modo selección → activar modo selección con este item
+      onEnterSelect && onEnterSelect(file.id)
+    } else {
+      onSelect && onSelect(file.id)
+    }
   }
   if (view === 'list') {
     return (
@@ -1082,10 +1507,11 @@ function FileCard({ file, view, onDownload, onMove, onDelete, onRename, onPrevie
         style={{ userSelect: 'none' }}
         draggable={!selectMode}
         onDragStart={e => { if (selectMode) { e.preventDefault(); return } e.dataTransfer.setData('teldrive-file-id', String(file.id)); e.dataTransfer.effectAllowed = 'move' }}
-        onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave}
+        onDragEnd={() => { suppressNextClick.current = true }}
+        onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave}
         onClick={handleCardClick}>
         <span className="row-icon" style={{ position: 'relative' }}>
-          <input type="checkbox" className="file-checkbox" style={{ position: 'relative', opacity: 1 }} checked={!!selected} onChange={() => onSelect && onSelect(file.id)} onClick={e => e.stopPropagation()} />
+          <input type="checkbox" className="file-checkbox" style={{ position: 'relative' }} checked={!!selected} onChange={handleCheckboxChange} onClick={e => e.stopPropagation()} />
         </span>
         <span className="row-name" title={file.name}>{file.name}{file.part_total > 1 && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--accent2)' }}>⛓ {file.part_total} partes</span>}</span>
         <span className="row-meta">{formatSize(file.size)}</span>
@@ -1114,9 +1540,10 @@ function FileCard({ file, view, onDownload, onMove, onDelete, onRename, onPrevie
       style={{ '--type-color': color, position: 'relative', userSelect: 'none' }}
       draggable={!selectMode}
       onDragStart={e => { if (selectMode) { e.preventDefault(); return } e.dataTransfer.setData('teldrive-file-id', String(file.id)); e.dataTransfer.effectAllowed = 'move' }}
-      onPointerDown={handlePointerDown} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave}
+      onDragEnd={() => { suppressNextClick.current = true }}
+      onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave}
       onClick={handleCardClick}>
-      <input type="checkbox" className="file-checkbox" checked={!!selected} onChange={() => onSelect && onSelect(file.id)} onClick={e => e.stopPropagation()} />
+      <input type="checkbox" className="file-checkbox" checked={!!selected} onChange={handleCheckboxChange} onClick={e => e.stopPropagation()} />
       {(file.type === 'image' || file.type === 'video')
         ? <div style={{ cursor: selectMode ? 'default' : 'zoom-in' }} onClick={e => { if (selectMode) return; onPreview && onPreview(file) }}><LazyThumb fileId={file.id} icon={getFileIcon(file.type)} /></div>
         : <div className="file-icon">{getFileIcon(file.type)}</div>}
@@ -1279,9 +1706,10 @@ function SidebarTree({ tree, currentPath, onNavigate }) {
   )
 }
 
-function FolderTreeNode({ node, currentPath, onNavigate, depth = 0, channelName }) {
+function FolderTreeNode({ node, currentPath, onNavigate, onFileDrop, depth = 0 }) {
   const isRoot = node.path === '/'
-  const [open, setOpen] = React.useState(true) // siempre abierto por defecto
+  const [open, setOpen] = React.useState(true)
+  const [dropOver, setDropOver] = React.useState(false)
   const hasChildren = node.children && node.children.length > 0
   const isActive = currentPath === node.path
 
@@ -1289,11 +1717,20 @@ function FolderTreeNode({ node, currentPath, onNavigate, depth = 0, channelName 
     if (currentPath.startsWith(node.path)) setOpen(true)
   }, [currentPath, node.path])
 
+  function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); setDropOver(true) }
+  function handleDragLeave(e) { e.stopPropagation(); setDropOver(false) }
+  function handleDrop(e) {
+    e.preventDefault(); e.stopPropagation(); setDropOver(false)
+    const fileId = e.dataTransfer.getData('teldrive-file-id')
+    if (fileId && onFileDrop) onFileDrop(parseInt(fileId), node.path)
+  }
+
   if (isRoot) {
     return (
       <div>
-        <div className={`tree-node${isActive ? ' active' : ''}`} style={{ paddingLeft: 6 }}
-          onClick={() => onNavigate('/')}>
+        <div className={`tree-node${isActive ? ' active' : ''}${dropOver ? ' drop-over' : ''}`} style={{ paddingLeft: 6 }}
+          onClick={() => onNavigate('/')}
+          onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
           <span className="tree-toggle" onClick={e => { if (hasChildren) { e.stopPropagation(); setOpen(o => !o) } }}>
             {hasChildren ? <Icon d={open ? icons.chevronD : icons.chevronR} size={11} /> : <span style={{ width: 11 }} />}
           </span>
@@ -1302,7 +1739,7 @@ function FolderTreeNode({ node, currentPath, onNavigate, depth = 0, channelName 
         </div>
         {open && hasChildren && (
           <div>
-            {node.children.map(c => <FolderTreeNode key={c.path} node={c} currentPath={currentPath} onNavigate={onNavigate} depth={1} />)}
+            {node.children.map(c => <FolderTreeNode key={c.path} node={c} currentPath={currentPath} onNavigate={onNavigate} onFileDrop={onFileDrop} depth={1} />)}
           </div>
         )}
       </div>
@@ -1311,8 +1748,9 @@ function FolderTreeNode({ node, currentPath, onNavigate, depth = 0, channelName 
 
   return (
     <div>
-      <div className={`tree-node${isActive ? ' active' : ''}`} style={{ paddingLeft: 6 + depth * 14 }}
-        onClick={() => onNavigate(node.path)}>
+      <div className={`tree-node${isActive ? ' active' : ''}${dropOver ? ' drop-over' : ''}`} style={{ paddingLeft: 6 + depth * 14 }}
+        onClick={() => onNavigate(node.path)}
+        onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
         <span className="tree-toggle" onClick={e => { if (hasChildren) { e.stopPropagation(); setOpen(o => !o) } }}>
           {hasChildren
             ? <Icon d={open ? icons.chevronD : icons.chevronR} size={11} />
@@ -1324,7 +1762,7 @@ function FolderTreeNode({ node, currentPath, onNavigate, depth = 0, channelName 
       </div>
       {open && hasChildren && (
         <div>
-          {node.children.map(c => <FolderTreeNode key={c.path} node={c} currentPath={currentPath} onNavigate={onNavigate} depth={depth + 1} />)}
+          {node.children.map(c => <FolderTreeNode key={c.path} node={c} currentPath={currentPath} onNavigate={onNavigate} onFileDrop={onFileDrop} depth={depth + 1} />)}
         </div>
       )}
     </div>
@@ -1754,6 +2192,7 @@ function MainApp() {
   const [channelsSidebarExpanded, setChannelsSidebarExpanded] = useState(false) // collapsed por defecto
   const [treeSidebarVisible, setTreeSidebarVisible] = useState(true)
   const [confirm, setConfirm] = useState(null) // { message, onConfirm }
+  const [defaultDlFolder, setDefaultDlFolder] = useState(null)
   const [showCloseDialog, setShowCloseDialog] = useState(false)
 
   // Escuchar evento de cierre desde Electron
@@ -1771,6 +2210,8 @@ function MainApp() {
     setSelected(prev => {
       const s = new Set(prev)
       s.has(id) ? s.delete(id) : s.add(id)
+      // Si quedó vacío, salir del modo selección
+      if (s.size === 0) setSelectMode(false)
       return s
     })
   }
@@ -1799,6 +2240,12 @@ function MainApp() {
       setDefaultChannelId(defaultId)
       const ordered = applyChannelOrder(chs, order)
       setChannels(ordered)
+      // Restaurar carpeta default de descargas
+      if (prefs['download-folder']) {
+        const folder = prefs['download-folder']
+        setDefaultDlFolder(folder)
+        _dlDefaultFolder = folder
+      }
       if (!ordered.length) return
       if (ordered.length === 1) { selectChannel(ordered[0]); return }
       if (defaultId) {
@@ -1808,39 +2255,13 @@ function MainApp() {
     }).catch(() => {})
     api.getStats().then(setStats).catch(() => {})
 
-    // Restaurar sesiones de descarga activas al recargar
+    // Restaurar cola de descargas de sesión anterior
     api.downloadSessionsActive().then(sessions => {
-      sessions.forEach(s => {
-        const transferId = addTransfer({
-          type: 'download',
-          name: s.name,
-          progress: s.status === 'ready' ? 100 : 0,
-          speed: 0,
-          status: s.status === 'ready' ? 'done' : 'downloading',
-          total: s.size || 0,
-        })
-
-        if (s.status === 'ready') {
-          // Ya listo — solo mostrar toast, no agregar al panel
-          removeTransfer(transferId)
-          toast(`"${s.name}" ya está listo — haz click en descargar`, 'info')
-        } else {
-          // En progreso — reconectar SSE
-          const sse = new EventSource(api.downloadProgressUrl(s.jobId))
-          sse.onmessage = (e) => {
-            const d = JSON.parse(e.data)
-            updateTransfer(transferId, { progress: d.progress, speed: d.speed, status: 'downloading', part: d.part, partTotal: d.partTotal })
-            if (d.status === 'ready') {
-              sse.close()
-              updateTransfer(transferId, { status: 'done', progress: 100, speed: 0 })
-              removeTransfer(transferId)
-              toast(`"${s.name}" listo para descargar`, 'success')
-            }
-            if (d.status === 'error') { sse.close(); updateTransfer(transferId, { status: 'error' }); removeTransfer(transferId) }
-          }
-          sse.onerror = () => sse.close()
-        }
-      })
+      for (const s of sessions) {
+        // 'ready' → el tmp sigue ahí, se guarda directo al procesar
+        // 'preparing' → el backend las borró al arrancar, se reencolan para re-descargar
+        dlEnqueue({ id: s.fileId, name: s.fileName, size: s.size })
+      }
     }).catch(() => {})
   }, [])
 
@@ -1988,6 +2409,8 @@ function MainApp() {
   }
 
   async function handleDragMove(fileId, targetPath) {
+    const src = files.find(f => f.id === fileId)
+    if (src && src.path === targetPath) return  // ya está en esta carpeta, ignorar
     try {
       await api.moveFile(fileId, targetPath)
       toast('Movido a ' + targetPath, 'success')
@@ -2142,60 +2565,26 @@ function MainApp() {
     })
   }
 
-  async function handleDownload(file) {
-    const fileName = file.part_name || file.name
-    const transferId = addTransfer({ type: 'download', name: fileName, progress: 0, speed: 0, status: 'downloading', total: file.size || 0 })
+  function handleDownload(file) {
+    dlEnqueue(file)
+  }
 
-    try {
-      // Paso 1: verificar si ya hay sesión activa para este archivo
-      const session = await api.downloadSession(file.id)
-
-      if (session.status === 'ready') {
-        // Ya descargado — servir directo
-        updateTransfer(transferId, { status: 'done', progress: 100, speed: 0 })
-        removeTransfer(transferId)
-        const a = document.createElement('a')
-        a.href = api.downloadServeUrl(session.jobId)
-        a.download = fileName
-        a.click()
-        return
-      }
-
-      if (session.status === 'preparing') {
-        // Ya en progreso — reconectar al SSE existente sin iniciar otro
-        toast(`Ya se está preparando "${fileName}", reconectando...`, 'info')
-        var jobId = session.jobId
-      } else {
-        // Paso 2: iniciar preparación nueva
-        const prepared = await api.downloadPrepare(file.id)
-        var jobId = prepared.jobId
-      }
-
-      // Paso 3: seguir progreso por SSE mientras descarga de Telegram a disco
-      await new Promise((resolve, reject) => {
-        const sse = new EventSource(api.downloadProgressUrl(jobId))
-        sse.onmessage = (e) => {
-          const d = JSON.parse(e.data)
-          updateTransfer(transferId, { progress: d.progress, speed: d.speed, status: 'downloading', part: d.part, partTotal: d.partTotal })
-          if (d.status === 'ready') { sse.close(); resolve() }
-          if (d.status === 'error') { sse.close(); reject(new Error(d.error || 'Error al preparar')) }
-        }
-        sse.onerror = () => { sse.close(); reject(new Error('Conexión SSE perdida')) }
-      })
-
-      // Paso 4: descargar desde disco local (soporta Range, puede resumir)
-      updateTransfer(transferId, { progress: 100, status: 'done', speed: 0 })
-      removeTransfer(transferId)
-      const a = document.createElement('a')
-      a.href = api.downloadServeUrl(jobId)
-      a.download = fileName
-      a.click()
-
-    } catch (e) {
-      updateTransfer(transferId, { status: 'error' })
-      removeTransfer(transferId)
-      toast('Error: ' + e.message, 'error')
+  async function handleChangeFolder() {
+    const folder = await window.electronAPI?.chooseFolder()
+    if (folder === undefined) {
+      // No Electron — pedir ruta manualmente
+      const input = window.prompt('Ruta de carpeta de descargas:', defaultDlFolder || '')
+      if (input === null) return
+      const folder2 = input.trim() || null
+      setDefaultDlFolder(folder2)
+      _dlDefaultFolder = folder2
+      api.setPrefs({ 'download-folder': folder2 }).catch(() => {})
+      return
     }
+    if (folder === null) return  // canceló
+    setDefaultDlFolder(folder)
+    _dlDefaultFolder = folder
+    api.setPrefs({ 'download-folder': folder }).catch(() => {})
   }
 
   const breadcrumbs = ['/', ...currentPath.replace(/^\//, '').replace(/\/$/, '').split('/').filter(Boolean)]
@@ -2331,7 +2720,7 @@ function MainApp() {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {activeChannel && tree
-                  ? <div className="folder-tree"><FolderTreeNode node={tree} currentPath={currentPath} onNavigate={setCurrentPath} /></div>
+                  ? <div className="folder-tree"><FolderTreeNode node={tree} currentPath={currentPath} onNavigate={setCurrentPath} onFileDrop={(fileId, path) => handleDragMove(fileId, path)} /></div>
                   : <div style={{ padding: 16, fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>Sin canal activo</div>
                 }
               </div>
@@ -2347,88 +2736,78 @@ function MainApp() {
         {/* Main */}
         <main className="main">
           <div className="topbar">
-            {/* Breadcrumb */}
-            <div className="breadcrumb">
+            {/* Barra superior: acciones */}
+            <div className="topbar-actions">
+              <div className="search-box">
+                <Icon d={icons.search} size={14} stroke="var(--text3)" />
+                <input placeholder="Buscar..."
+                  value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+                {searchQ && <button style={{ background: 'none', border: 'none', color: 'var(--text3)', padding: 0, display: 'flex' }} onClick={() => setSearchQ('')}><Icon d={icons.x} size={14} /></button>}
+              </div>
+
+              <div className="topbar-spacer" />
+
               {activeChannel && (
                 <>
-                  <span className="breadcrumb-item" title="Inicio" onClick={() => {
-                    if (defaultChannelId) {
-                      const def = channels.find(c => c.id === defaultChannelId)
-                      if (def) { selectChannel(def); return }
-                    }
-                    setActiveChannel(null); setFiles([]); setTree(null); setCurrentPath('/')
-                  }}>
-                    <Icon d={icons.home} size={14} />
-                  </span>
-                  <span className="breadcrumb-sep"><Icon d={icons.chevronR} size={12} /></span>
-                  <span className="breadcrumb-item" onClick={() => setCurrentPath('/')}>{activeChannel.name}</span>
+                  <button className="btn btn-icon" style={{ background: 'var(--bg3)', border: '1px solid var(--border2)', color: 'var(--text)' }} title="Nueva carpeta" onClick={() => setShowNewFolder(true)}>
+                    <Icon d={icons.newfolder} size={14} />
+                  </button>
+                  <button className="btn btn-primary btn-icon" title="Subir" onClick={() => setShowUpload(true)}>
+                    <Icon d={icons.upload} size={14} />
+                  </button>
+                  <div style={{ width: 1, background: 'var(--border)', height: 20 }} />
+                  <div style={{ display: 'flex', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: 2, gap: 1 }}>
+                    {[['name','Nombre'],['date','Fecha'],['size','Tamaño'],['type','Tipo']].map(([col, label]) => (
+                      <button key={col}
+                        style={{ padding: '4px 8px', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                          background: sortBy === col ? 'var(--bg2)' : 'none',
+                          color: sortBy === col ? 'var(--text)' : 'var(--text3)' }}
+                        onClick={() => handleSort(col)}>
+                        {label}{sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ width: 1, background: 'var(--border)', height: 20 }} />
+                </>
+              )}
+
+              <DownloadManager defaultFolder={defaultDlFolder} onChangeFolder={handleChangeFolder} />
+
+              <div className="view-toggle">
+                <button title="Canales" style={{ opacity: channelsSidebarExpanded ? 1 : 0.5 }} onClick={() => setChannelsSidebarExpanded(v => !v)}><Icon d={icons.channel} size={14} /></button>
+                <button title="Árbol" style={{ opacity: treeSidebarVisible ? 1 : 0.5 }} onClick={() => setTreeSidebarVisible(v => !v)}><Icon d={icons.folder} size={14} /></button>
+                <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><Icon d={icons.grid} size={14} /></button>
+                <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><Icon d={icons.list} size={14} /></button>
+              </div>
+            </div>
+
+            {/* Barra inferior: breadcrumb */}
+            <div className="topbar-breadcrumb">
+              <span className="breadcrumb-item" title="Inicio" onClick={() => {
+                if (defaultChannelId) { const def = channels.find(c => c.id === defaultChannelId); if (def) { selectChannel(def); return } }
+                setActiveChannel(null); setFiles([]); setTree(null); setCurrentPath('/')
+              }}><Icon d={icons.home} size={13} /></span>
+              {activeChannel && (
+                <>
+                  <span className="breadcrumb-sep"><Icon d={icons.chevronR} size={11} /></span>
+                  <span className="breadcrumb-item" onClick={() => setCurrentPath('/')} style={{ flexShrink: 0 }}>{activeChannel.name}</span>
                   {breadcrumbs.slice(1).map((seg, i) => {
                     const path = '/' + breadcrumbs.slice(1, i + 2).join('/') + '/'
                     const isLast = i === breadcrumbs.length - 2
                     return (
-                      <span key={path} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span className="breadcrumb-sep"><Icon d={icons.chevronR} size={12} /></span>
-                        <span className={`breadcrumb-item ${isLast ? 'current' : ''}`} onClick={() => setCurrentPath(path)}>{seg}</span>
+                      <span key={path} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                        <span className="breadcrumb-sep"><Icon d={icons.chevronR} size={11} /></span>
+                        <span className={`breadcrumb-item${isLast ? ' current' : ''}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => setCurrentPath(path)}>{seg}</span>
                       </span>
                     )
                   })}
                 </>
               )}
-              {!activeChannel && <span style={{ color: 'var(--text3)', fontSize: 13 }}>Selecciona un canal</span>}
               {activeChannel && folderSize && (
-                <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', marginLeft: 8 }}>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                   {folderSize.count} archivos · {formatSize(folderSize.size)}
                 </span>
               )}
-            </div>
-
-            {/* Search */}
-            <div className="search-box">
-              <Icon d={icons.search} size={14} stroke="var(--text3)" />
-              <input placeholder={activeChannel ? 'Buscar en ' + activeChannel.name + '...' : 'Buscar...'}
-                value={searchQ} onChange={e => setSearchQ(e.target.value)} />
-              {searchQ && <button style={{ background: 'none', border: 'none', color: 'var(--text3)', padding: 0, display: 'flex' }} onClick={() => setSearchQ('')}><Icon d={icons.x} size={14} /></button>}
-            </div>
-
-            {/* Actions */}
-            {activeChannel && (
-              <>
-                <button className="btn" style={{ background: 'var(--bg3)', border: '1px solid var(--border2)', color: 'var(--text)' }} onClick={() => setShowNewFolder(true)}>
-                  <Icon d={icons.newfolder} size={14} /> Nueva carpeta
-                </button>
-                <button className="btn btn-primary" onClick={() => setShowUpload(true)}>
-                  <Icon d={icons.upload} size={14} /> Subir
-                </button>
-              </>
-            )}
-
-            {activeChannel && (
-              <div style={{ display: 'flex', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 8, padding: 2, gap: 1 }}>
-                {[['name','Nombre'],['date','Fecha'],['size','Tamaño'],['type','Tipo']].map(([col, label]) => (
-                  <button key={col}
-                    style={{ padding: '4px 8px', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
-                      background: sortBy === col ? 'var(--bg2)' : 'none',
-                      color: sortBy === col ? 'var(--text)' : 'var(--text3)' }}
-                    onClick={() => handleSort(col)}>
-                    {label}{sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="view-toggle">
-              <button title="Canales" style={{ opacity: channelsSidebarExpanded ? 1 : 0.5 }}
-                onClick={() => setChannelsSidebarExpanded(v => !v)}>
-                <Icon d={icons.channel} size={15} />
-              </button>
-              <button title="Árbol de carpetas" style={{ opacity: treeSidebarVisible ? 1 : 0.5 }}
-                onClick={() => setTreeSidebarVisible(v => !v)}>
-                <Icon d={icons.folder} size={15} />
-              </button>
-            </div>
-            <div className="view-toggle">
-              <button className={view === 'grid' ? 'active' : ''} onClick={() => setView('grid')}><Icon d={icons.grid} size={15} /></button>
-              <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}><Icon d={icons.list} size={15} /></button>
             </div>
           </div>
 
@@ -2436,7 +2815,15 @@ function MainApp() {
             className={"content" + (dragOver === 'content' ? ' drag-over' : '')}
             onDragOver={e => { if (!activeChannel) return; e.preventDefault(); setDragOver('content') }}
             onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(null) }}
-            onDrop={e => { e.preventDefault(); setDragOver(null); handleDropUpload(e.dataTransfer.files, currentPath, e.dataTransfer.items) }}
+            onDrop={e => {
+              e.preventDefault(); setDragOver(null)
+              const fileId = e.dataTransfer.getData('teldrive-file-id')
+              if (fileId) {
+                handleDragMove(parseInt(fileId), currentPath)
+              } else {
+                handleDropUpload(e.dataTransfer.files, currentPath, e.dataTransfer.items)
+              }
+            }}
           >
             {!activeChannel ? (
               channels.length === 0 ? (
@@ -2504,6 +2891,12 @@ function MainApp() {
                 {selected.size > 0 && (
                   <div className="selection-bar">
                     <span>{selected.size} seleccionado{selected.size > 1 ? 's' : ''}</span>
+                    <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => {
+                      files.filter(f => selected.has(f.id)).forEach(f => dlEnqueue(f))
+                      clearSelection()
+                    }}>
+                      <Icon d={icons.download} size={13} /> Descargar
+                    </button>
                     <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={handleMoveSelected}>
                       <Icon d={icons.move} size={13} /> Mover
                     </button>
@@ -2524,6 +2917,7 @@ function MainApp() {
                 ) : view === 'grid' ? (
                   <>
                     {displayFiles.length > 50 ? (
+                      <div className={selectMode ? 'select-mode' : ''}>
                       <VirtualGrid
                         items={displayFiles}
                         itemWidth={160}
@@ -2531,8 +2925,9 @@ function MainApp() {
                         gap={12}
                         renderItem={f => <FileCard key={f.id} file={f} view="grid" selected={selected.has(f.id)} onSelect={toggleSelect} selectMode={selectMode} onEnterSelect={enterSelectMode} onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} onRename={handleRenameFile} onPreview={handlePreview} />}
                       />
+                      </div>
                     ) : (
-                    <div className="file-grid">
+                    <div className={`file-grid${selectMode ? ' select-mode' : ''}`}>
                       {displayFiles.map(f => <FileCard key={f.id} file={f} view="grid" selected={selected.has(f.id)} onSelect={toggleSelect} selectMode={selectMode} onEnterSelect={enterSelectMode} onDownload={handleDownload} onMove={handleMove} onDelete={handleDelete} onRename={handleRenameFile} onPreview={handlePreview} />)}
                     </div>
                     )}
@@ -2546,7 +2941,7 @@ function MainApp() {
                   </>
                 ) : (
                   <>
-                    <div className="file-list">
+                    <div className={`file-list${selectMode ? ' select-mode' : ''}`}>
                       <div className="file-row" style={{ color: 'var(--text3)', fontSize: 11, fontFamily: 'var(--mono)', cursor: 'default' }}>
                         <span />
                         <span>Nombre</span>

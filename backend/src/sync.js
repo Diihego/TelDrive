@@ -204,31 +204,57 @@ export async function pullManifest(channelId) {
     return null
   }
 
-  // Reemplazo completo: borrar estado local del canal y re-insertar desde manifest
-  // Esto garantiza que ítems borrados en otros PCs no se restauren
-  const existingFiles = db.prepare('SELECT file_id, alias FROM files WHERE channel_id = ?').all(channelId)
-  const aliasMap = new Map(existingFiles.map(f => [f.file_id, f.alias]).filter(([, a]) => a))
+  // Sync inteligente: preserva IDs existentes, solo toca lo que cambió
+  const existingFiles = db.prepare('SELECT id, file_id, message_id, alias FROM files WHERE channel_id = ?').all(channelId)
+  const existingByFileId = new Map(existingFiles.map(f => [f.file_id, f]))
+  const existingByMsgId = new Map(existingFiles.map(f => [f.message_id, f]))
+  const manifestFileIds = new Set((manifest.files || []).map(f => f.file_id))
 
-  db.prepare('DELETE FROM files WHERE channel_id = ?').run(channelId)
-  db.prepare('DELETE FROM folders WHERE channel_id = ?').run(channelId)
+  // Borrar archivos que ya no están en el manifest
+  for (const existing of existingFiles) {
+    if (!manifestFileIds.has(existing.file_id)) {
+      db.prepare('DELETE FROM files WHERE id = ?').run(existing.id)
+    }
+  }
 
   const insertFile = db.prepare(`
     INSERT OR IGNORE INTO files (channel_id, file_id, message_id, name, path, size, mime_type, type, date, part_group, part_num, part_total, part_name, alias)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
+  const updateFile = db.prepare(`
+    UPDATE files SET path=?, name=?, size=?, part_group=?, part_num=?, part_total=?, part_name=?
+    WHERE id=?
+  `)
   let imported = 0
   for (const f of manifest.files || []) {
-    // Preservar alias (renombres) aunque se reemplacen los datos del manifest
-    const alias = aliasMap.get(f.file_id) || null
-    const result = insertFile.run([
-      channelId, f.file_id, f.message_id, f.name,
-      f.path, f.size, f.mime_type, f.type, f.date,
-      f.part_group || null, f.part_num || null, f.part_total || null, f.part_name || null,
-      alias,
-    ])
-    if (result.changes > 0) imported++
+    const existing = existingByFileId.get(f.file_id) || existingByMsgId.get(f.message_id)
+    if (existing) {
+      // Actualizar solo datos que pueden cambiar (path, nombre, etc.) — preservar id y alias
+      updateFile.run([
+        f.path, f.name, f.size,
+        f.part_group || null, f.part_num || null, f.part_total || null, f.part_name || null,
+        existing.id,
+      ])
+    } else {
+      // Archivo nuevo — insertar
+      const result = insertFile.run([
+        channelId, f.file_id, f.message_id, f.name,
+        f.path, f.size, f.mime_type, f.type, f.date,
+        f.part_group || null, f.part_num || null, f.part_total || null, f.part_name || null,
+        null,
+      ])
+      if (result.changes > 0) imported++
+    }
   }
 
+  // Sync carpetas: borrar las que no están en manifest, insertar las nuevas
+  const existingFolders = db.prepare('SELECT full_path FROM folders WHERE channel_id = ?').all(channelId)
+  const manifestFolderPaths = new Set((manifest.folders || []).map(f => f.full_path))
+  for (const f of existingFolders) {
+    if (!manifestFolderPaths.has(f.full_path)) {
+      db.prepare('DELETE FROM folders WHERE channel_id = ? AND full_path = ?').run([channelId, f.full_path])
+    }
+  }
   const insertFolder = db.prepare('INSERT OR IGNORE INTO folders (channel_id, full_path) VALUES (?, ?)')
   let foldersImported = 0
   for (const folder of manifest.folders || []) {

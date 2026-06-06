@@ -51,6 +51,8 @@ export const api = {
   downloadSession: (fileId) => req(`/download-session/${fileId}`),
   downloadSessionsActive: () => req('/download-sessions/active'),
   downloadPrepare: (fileId) => req(`/download-prepare/${fileId}`, { method: 'POST' }),
+  downloadCancel: (jobId) => req(`/download-prepare/${jobId}`, { method: 'DELETE' }),
+  downloadSave: (jobId, targetDir, fileName) => req(`/download-save/${jobId}`, { method: 'POST', body: JSON.stringify({ targetDir, fileName }) }),
   downloadProgressUrl: (jobId) => `${BASE}/download-progress/${jobId}`,
   downloadServeUrl: (jobId) => `${BASE}/download-serve/${jobId}`,
 
